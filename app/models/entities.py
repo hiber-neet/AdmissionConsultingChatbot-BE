@@ -1,7 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Boolean, Date, Float, ForeignKey, Text
 )
-from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION, VECTOR
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy import create_engine
 
@@ -38,8 +37,8 @@ class Users(Base):
 class UserRole(Base):
     __tablename__ = "UserRole"
 
-    role_id = Column(Integer, ForeignKey("Role.role_id"))
-    user_id = Column(Integer, ForeignKey("Users.user_id"))
+    role_id = Column(Integer, ForeignKey("Role.role_id"),primary_key=True)
+    user_id = Column(Integer, ForeignKey("Users.user_id"), primary_key=True)
 
 
 # ------------------------------------------------------------
@@ -120,7 +119,7 @@ class FaqStatistics(Base):
 
     faq_id = Column(Integer, primary_key=True)
     usage_count = Column(Integer)
-    success_rate = Column(DOUBLE_PRECISION)
+   
     question_text = Column(String)
     last_used_at = Column(Date)
     intent_id = Column(Integer, ForeignKey("Intent.intent_id"))
@@ -149,7 +148,7 @@ class DocumentChunk(Base):
 
     chunk_id = Column(Integer, primary_key=True)
     chunk_text = Column(Text)
-    embedding_vector = Column(VECTOR(1536))
+    embedding_vector = Column(Text)
     created_at = Column(Date)
     document_id = Column(Integer, ForeignKey("KnowledgeBaseDocument.document_id"))
 
@@ -191,8 +190,8 @@ class ChatInteraction(Base):
 class ParticipateChatSession(Base):
     __tablename__ = "ParticipateChatSession"
 
-    user_id = Column(Integer, ForeignKey("Users.user_id"))
-    session_id = Column(Integer, ForeignKey("ChatSession.chat_session_id"))
+    user_id = Column(Integer, ForeignKey("Users.user_id"), primary_key=True)
+    session_id = Column(Integer, ForeignKey("ChatSession.chat_session_id"), primary_key=True)
 
 
 # ------------------------------------------------------------
@@ -270,7 +269,6 @@ class PersonalizedRecommendation(Base):
     __tablename__ = "PersionalizedRecommendation"
 
     recommendation_id = Column(Integer, primary_key=True)
-    confidence_score = Column(DOUBLE_PRECISION)
     user_id = Column(Integer, ForeignKey("Users.user_id"))
     base_intent_id = Column(Integer, ForeignKey("Intent.intent_id"))
     suggested_intent_id = Column(Integer, ForeignKey("Intent.intent_id"))

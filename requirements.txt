@@ -1,36 +1,34 @@
 
-=== CORE FRAMEWORK ===
+
 fastapi==0.104.1              # Web framework
 uvicorn[standard]==0.24.0     # ASGI server
 
-=== DATABASE ===
+
 sqlalchemy==2.0.23            # ORM
-psycopg2-binary==2.9.9        # PostgreSQL driver
 alembic==1.13.0               # Database migrations
 python-dotenv==1.0.0          # Environment variables
 
-=== DATA VALIDATION ===
-pydantic==2.5.0               # Schema validation
+
+pydantic            # Schema validation
 pydantic-settings==2.1.0      # Settings management
 python-multipart==0.0.6       # File upload handling
+pydantic[email]
 
-=== AI/ML - CORE ===
-langchain==0.1.0              # LLM orchestration framework
-langchain-google-genai==0.0.5 # Gemini integration
-google-generativeai==0.3.0    # Gemini API client (fallback)
+langchain==1.0.0              # LLM orchestration framework
+langchain-google-genai==3.0.0 # Gemini integration
 
-=== EMBEDDINGS & VECTOR DB ===
-qdrant-client==1.7.0          # Qdrant vector DB client
-sentence-transformers==2.2.2  # For embeddings (optional backup)
 
-=== AUTHENTICATION ===
+qdrant-client==1.15.1
+sentence-transformers==5.1.1
+
+
 python-jose[cryptography]==3.3.0  # JWT tokens
 passlib[bcrypt]==1.7.4            # Password hashing
 
-=== UTILITIES ===
+
 python-dateutil==2.8.2        # Date/time utilities
 
-=== FILE PROCESSING - TEXT & DOCUMENTS ===
+
 PyPDF2==3.0.1                 # Extract text from PDF
 pdfplumber==0.10.3            # Better PDF parsing (Vietnamese support)
 python-docx==0.8.11           # Extract text from DOCX/DOC
@@ -39,8 +37,8 @@ openpyxl==3.1.2               # Extract text from XLSX (optional)
 beautifulsoup4==4.12.2        # HTML parsing
 lxml==4.9.3                   # XML parsing (needed by BeautifulSoup)
 
-=== VIETNAMESE SUPPORT ===
+
 unidecode==1.3.7              # Handle Vietnamese characters/accents
 
-=== LOGGING & MONITORING ===
+
 python-json-logger==2.0.7     # JSON logging for production
