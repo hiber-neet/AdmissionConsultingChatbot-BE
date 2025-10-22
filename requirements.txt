@@ -41,4 +41,5 @@ lxml==4.9.3                   # XML parsing (needed by BeautifulSoup)
 unidecode==1.3.7              # Handle Vietnamese characters/accents
 
 
+
 python-json-logger==2.0.7     # JSON logging for production
