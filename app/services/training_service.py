@@ -5,7 +5,10 @@ from qdrant_client.models import Distance, VectorParams, PointStruct
 import os
 import uuid
 import asyncio
-class LangChainService:
+from sqlalchemy.orm import Session
+from app.models.entities import TrainingQuestionAnswer
+
+class TrainingService:
     def __init__(self):
         self.gemini_api_key = os.getenv("GEMINI_API_KEY")
         self.llm = GoogleGenerativeAI(
@@ -42,21 +45,6 @@ class LangChainService:
         except:
             pass
 
-    # def add_documents(self, texts: List[str], metadatas: List[dict] = None) -> List[str]:
-    #     text_splitter = RecursiveCharacterTextSplitter(
-    #         chunk_size=1000,
-    #         chunk_overlap=200
-    #     )
-
-    #     documents = []
-    #     for i, text in enumerate(texts):
-    #         chunks = text_splitter.split_text(text)
-    #         for chunk in chunks:
-    #             metadata = metadatas[i] if metadatas else {}
-    #             documents.append(Document(page_content=chunk, metadata=metadata))
-
-    #     ids = self.vector_store.add_documents(documents)
-    #     return ids
 
     async def stream_response_from_context(self, query: str, context: str):
         """Stream phản hồi từ Gemini, từng chunk một."""
@@ -107,6 +95,64 @@ class LangChainService:
             chunk_ids.append(point_id)
         
         return chunk_ids
+    def add_training_qa(self, db: Session, question_id: int, intent_id: int, question_text: str, answer_text: str):
+        """
+        Add training Q&A pair vào Qdrant
+        
+        Chỉ embed question, không embed answer:
+        - Answer stored ở DB, retrieve khi match found
+        - Question dùng để search/match
+        - Tiết kiệm storage, tăng search speed
+        
+        Args:
+            question_id: Primary key của training Q&A
+            intent_id: Intent này thuộc intent nào
+            question_text: Question để embed
+            answer_text: Answer (lưu ở DB, không embed)
+        
+        Returns:
+            embedding_id: Qdrant point ID
+        """
+        new_qa = TrainingQuestionAnswer(
+            question=question_text,
+            answer=answer_text,
+            intent_id=intent_id,
+            created_by=1
+        )
+        db.add(new_qa)
+        db.commit()
+        db.refresh(new_qa)
+        # Embed question text
+        embedding = self.embeddings.embed_query(question_text)
+        point_id = str(uuid.uuid4())
+        
+        # Upsert vào training_qa collection
+        # Metadata:
+        # - question_id: Link về DB
+        # - intent_id: Để track intent stats
+        # - question_text: Lưu original text (optional, space saving)
+        # - answer_text: Lưu answer (retrieve khi match)
+        self.qdrant_client.upsert(
+            collection_name=self.training_qa_collection,
+            points=[
+                PointStruct(
+                    id=point_id,
+                    vector=embedding,
+                    payload={
+                        "question_id": question_id,
+                        "intent_id": intent_id,
+                        "question_text": question_text,
+                        "answer_text": answer_text,
+                        "type": "training_qa"
+                    }
+                )
+            ]
+        )
+        
+        return {
+            "postgre_question_id": new_qa.question_id,
+            "qdrant_question_id": point_id
+        }
     def search_documents(self, query: str, top_k: int = 5):
         """
         Search documents (Fallback)
@@ -153,7 +199,7 @@ class LangChainService:
         """
         
         # Prompt engineering: Context + Query + Instructions
-        prompt = f"""Bạn là một chatbot tư vấn tuyển sinh chuyên nghiệp. 
+        prompt = f"""Bạn là một chatbot tư vấn tuyển sinh chuyên nghiệp của trường XYZ. 
 Dựa trên thông tin dưới đây, hãy trả lời câu hỏi của sinh viên:
 
 === THÔNG TIN THAM KHẢO ===
@@ -175,4 +221,4 @@ Dựa trên thông tin dưới đây, hãy trả lời câu hỏi của sinh vi�
         response = self.llm.invoke(prompt)
         return response
 
-langchain_service = LangChainService()
+langchain_service = TrainingService()
