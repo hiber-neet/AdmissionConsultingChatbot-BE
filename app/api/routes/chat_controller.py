@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 import uuid
 import json
-from app.services.langchain_service import langchain_service
+from app.services.training_service import TrainingService
 from pathlib import Path
 
 router = APIRouter()
@@ -39,12 +39,12 @@ async def websocket_chat(websocket: WebSocket):
             data = await websocket.receive_text()
             message = json.loads(data).get("message", "")
 
-            # 🔍 Tìm context liên quan
-            doc_results = langchain_service.search_documents(message, top_k=5)
+            # Tìm context liên quan
+            doc_results = TrainingService.search_documents(message, top_k=5)
             context = "\n\n".join([r.payload.get("chunk_text", "") for r in doc_results])
 
-            # ⚡ Stream phản hồi từng phần
-            async for chunk in langchain_service.stream_response_from_context(message, context):
+            # Stream phản hồi từng phần
+            async for chunk in TrainingService.stream_response_from_context(message, context):
                 # chunk có thể là str hoặc object tuỳ model → ép về text
                 content = getattr(chunk, "content", None) or str(chunk)
                 
@@ -54,7 +54,7 @@ async def websocket_chat(websocket: WebSocket):
                     "content": content
                 }))
 
-            # ✅ Gửi tín hiệu kết thúc khi hoàn tất
+            # Gửi tín hiệu kết thúc khi hoàn tất
             try:
                 await websocket.send_text(json.dumps({
                     "event": "done",

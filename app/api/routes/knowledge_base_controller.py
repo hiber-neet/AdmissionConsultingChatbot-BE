@@ -1,13 +1,13 @@
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, APIRouter
 from sqlalchemy.orm import Session
 from app.models.database import init_db, get_db
+from app.services.training_service import TrainingService
 from app.utils.document_processor import documentProcessor
 from pathlib import Path
-from app.services.langchain_service import langchain_service
 from sqlalchemy.orm import Session
 
 router = APIRouter()
-@router.post("/upload")
+@router.post("/upload/document")
 async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db)
@@ -80,7 +80,7 @@ async def upload_document(
     
     # STEP 5: CHUNK + EMBED + STORE IN QDRANT
     try:
-        chunk_ids = langchain_service.add_document(
+        chunk_ids = TrainingService.add_document(
             1,
             content_text,
             {
@@ -122,3 +122,14 @@ async def upload_document(
         "original_size_kb": len(file_content) / 1024,
         "extracted_text_length": len(content_text)
     }
+
+@router.post("/upload/training_question")
+async def upload_training_question(intent_id: int, question_text: str, answer_text: str, db: Session = Depends(get_db), current_user_id: int = 1):
+    result = TrainingService.add_training_qa(
+        db=db,
+        intent_id=intent_id,
+        question_text=question_text,
+        answer_text=answer_text,
+        created_by=current_user_id
+    )
+    return {"message": "Training Q&A added successfully", "result": result}
