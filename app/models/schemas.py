@@ -3,6 +3,21 @@ from typing import Optional, List
 from datetime import date
 
 
+# ================= AUTH =================
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+
+class TokenData(BaseModel):
+    email: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
 # ================= ROLE =================
 class RoleBase(BaseModel):
     role_name: str
