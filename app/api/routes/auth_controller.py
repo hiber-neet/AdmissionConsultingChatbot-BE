@@ -8,6 +8,8 @@ from app.core.security import (
     get_password_hash,
     verify_password,
     ACCESS_TOKEN_EXPIRE_MINUTES,
+    get_current_user,
+    verify_user_access
 )
 from app.models.database import get_db
 from app.models.schemas import Token, UserCreate, UserResponse, LoginRequest
@@ -74,5 +76,5 @@ def login(
         "access_token": create_access_token(
             {"sub": user.email, "user_id": user.user_id}
         ),
-        "token_type": "bearer",
-    }
+            "token_type": "bearer",
+        }
