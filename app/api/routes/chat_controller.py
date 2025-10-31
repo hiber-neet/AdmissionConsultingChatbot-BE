@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import List, Optional
 import uuid
+import asyncio
 import json
 from app.services.training_service import TrainingService
 from pathlib import Path
@@ -29,43 +30,97 @@ router = APIRouter()
 #             "intent_id": None,
 #             "sources": [r.payload.get("document_id") for r in doc_results]
 #             }
-
+#thêm 2 tầng check chat
 @router.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     await websocket.accept()
+    greeting_chunks = ["Chào bạn! 👋 Mình là Chatbot tư vấn tuyển sinh của trường XYZ.", "Rất vui được đồng hành cùng bạn!\nMình có thể giúp bạn:","\n\n 1️⃣ Giới thiệu các ngành học, chương trình đào tạo và đặc điểm nổi bật của từng ngành.\n\n", "2️⃣ Tư vấn lộ trình học tập, cơ hội nghề nghiệp và kỹ năng cần có cho từng ngành.\n\n", "3️⃣ Cung cấp thông tin tuyển sinh: điều kiện, hồ sơ, mốc thời gian quan trọng.\n\n", "4️⃣ Hướng dẫn tham gia các hoạt động trải nghiệm, câu lạc bộ, thực tập và học bổng.\n\n", "5️⃣ Giải đáp thắc mắc về cơ sở vật chất, ký túc xá, và các dịch vụ hỗ trợ sinh viên.\n\nBạn muốn bắt đầu tìm hiểu về lĩnh vực hay ngành học nào trước? 😄"]
+    for chunk in greeting_chunks:
+        await websocket.send_text(json.dumps({"event": "chunk", "content": chunk}))
+        await asyncio.sleep(0.01)  # delay ngắn để client hiển thị mượt
+    
+    await websocket.send_text(json.dumps({"event": "done", "sources": [], "confidence": 1.0}))
     try:
         while True:
             # Nhận tin nhắn từ client
             data = await websocket.receive_text()
             message = json.loads(data).get("message", "")
-
+        
+            
             # Tìm context liên quan
-            doc_results = TrainingService.search_documents(message, top_k=5)
-            context = "\n\n".join([r.payload.get("chunk_text", "") for r in doc_results])
+            # doc_results = TrainingService.search_documents(message, top_k=5)
+            service = TrainingService()
+            result  = service.hybrid_search(message)
+            
+            tier_source = result.get("response_source")
+            confidence = result.get("confidence", 0.0)
 
-            # Stream phản hồi từng phần
-            async for chunk in TrainingService.stream_response_from_context(message, context):
-                # chunk có thể là str hoặc object tuỳ model → ép về text
-                content = getattr(chunk, "content", None) or str(chunk)
-                
-                # Gửi JSON để client dễ parse
+            # === TIER 1: training_qa - score > 0.8 ===
+            if tier_source == "training_qa" and confidence > 0.8:
+                print("floor 1")
+                response_text = result["response_official_answer"]
+
                 await websocket.send_text(json.dumps({
                     "event": "chunk",
-                    "content": content
+                    "content": response_text
                 }))
-
-            # Gửi tín hiệu kết thúc khi hoàn tất
-            try:
                 await websocket.send_text(json.dumps({
                     "event": "done",
-                    "sources": [r.payload.get("document_id") for r in doc_results],
-                    "confidence": doc_results[0].score if doc_results else None
+                    "sources": result.get("sources", []),
+                    "confidence": confidence
                 }))
-            except Exception:
-                print("⚠️ Không thể gửi event done vì client đã ngắt.")
-                break
+                continue
+            # === TIER 2: hybrid (0.7 < score <= 0.8) ===
+            # elif result["response_source"] == "training_qa" and result["confidence"] > 0.7:
+            #     print("floor 2")
+            #     async for chunk in service.stream_response_from_hybrid(
+            #         query=message,
+            #         official_answer=result["response_official_answer"],
+            #         additional_context=result.get("additional_context", "")
+            #     ):
+            #         await websocket.send_text(json.dumps({
+            #             "event": "chunk",
+            #             "content": getattr(chunk, "content", str(chunk))
+            #         }))
+            #     try:
+            #         await websocket.send_text(json.dumps({
+            #             "event": "done",
+            #             "confidence": confidence
+            #         }))
+            #     except Exception:
+            #         print("Không thể gửi event done vì client đã ngắt.")
+            #         break
+            # === TIER 3: document-only (no QA match) ===
+            else:
+                print("floor 3")
+                context = "\n\n".join([r.payload.get("chunk_text", "") for r in result["response"]])
+                service = TrainingService()
+                # Stream phản hồi từng phần
+                async for chunk in service.stream_response_from_context(message, context):
+                    # chunk có thể là str hoặc object tuỳ model → ép về text
+                    content = getattr(chunk, "content", None) or str(chunk)
+                    
+                    # Gửi JSON để client dễ parse
+                    await websocket.send_text(json.dumps({
+                        "event": "chunk",
+                        "content": content
+                    }))
+
+            # Gửi tín hiệu kết thúc khi hoàn tất
+                try:
+                    await websocket.send_text(json.dumps({
+                        "event": "done",
+                        "sources": result.get("sources", []),
+                        "confidence": confidence
+                    }))
+                except Exception:
+                    print("Không thể gửi event done vì client đã ngắt.")
+                    break
     except WebSocketDisconnect:
         print("Client disconnected")
+
+
+            
 
 
 
