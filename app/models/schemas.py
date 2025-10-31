@@ -11,11 +11,26 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+class UserProfileResponse(BaseModel):
+    user_id: int
+    full_name: str 
+    email: str
+    role_name: Optional[str]
+    student_profile: Optional[dict] = None
+    consultant_profile: Optional[dict] = None
+    content_manager_profile: Optional[dict] = None
+    admission_official_profile: Optional[dict] = None
+
+    class Config:
+        orm_mode = True
 
 
 # ================= ROLE =================
