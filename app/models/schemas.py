@@ -177,13 +177,13 @@ class IntentResponse(IntentBase):
         orm_mode = True
 
 
-class TrainingQuestionBase(BaseModel):
+class TrainingQuestionRequest(BaseModel):
     question: str
     answer: str
     intent_id: Optional[int]
 
 
-class TrainingQuestionResponse(TrainingQuestionBase):
+class TrainingQuestionResponse(TrainingQuestionRequest):
     question_id: int
 
     class Config:
