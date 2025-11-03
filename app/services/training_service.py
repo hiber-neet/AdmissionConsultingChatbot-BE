@@ -1,5 +1,6 @@
 from langchain_google_genai import GoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_text_splitters  import RecursiveCharacterTextSplitter
+from langchain_classic.memory import ConversationBufferMemory
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 import os
@@ -16,6 +17,7 @@ class TrainingService:
             google_api_key=self.gemini_api_key,
             temperature=0.7
         )
+        self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
         self.embeddings = GoogleGenerativeAIEmbeddings(
                     model="models/gemini-embedding-001",
                     google_api_key=self.gemini_api_key
@@ -24,6 +26,7 @@ class TrainingService:
             host=os.getenv("QDRANT_HOST", "localhost"),
             port=int(os.getenv("QDRANT_PORT", 6333))
         )
+        self.previous_context = self.memory.load_memory_variables({}).get("chat_history", "")
         self.training_qa_collection = "training_qa"
         self.documents_collection = "knowledge_base_documents"
         self._init_collections()
@@ -56,8 +59,13 @@ class TrainingService:
         return "true" in result     
 
     async def stream_response_from_context(self, query: str, context: str):
+        memory_vars = self.memory.load_memory_variables({})
+        prev = memory_vars.get("chat_history", "")
+        print("Content History (context):", self.previous_context)
         """Stream phản hồi từ Gemini, từng chunk một."""
         prompt = f"""Bạn là một chatbot tư vấn tuyển sinh chuyên nghiệp của trường XYZ
+        Đây là đoạn hội thoại trước: 
+        {self.previous_context}
         === THÔNG TIN THAM KHẢO ===
         {context}
         === CÂU HỎI ===
@@ -76,14 +84,22 @@ class TrainingService:
             hoặc  
             “Nếu bạn quan tâm học bổng, mình có thể nói rõ các loại học bổng hiện có nhé!”
         """
-
+        full_response = ""
         async for chunk in self.llm.astream(prompt):
             yield chunk
+            full_response += chunk
             await asyncio.sleep(0)  # Nhường event loop
+        self.memory.save_context({"input": query}, {"output": full_response})  
+        print("Saved to memory. Current messages:", len(self.memory.chat_memory.messages)) 
     async def stream_response_from_qa(self, query: str, context: str):
+      
+        memory_vars = self.memory.load_memory_variables({})
+        prev = memory_vars.get("chat_history", "")
+        print("Loaded memory (context):", bool(prev), "chars:", len(prev))
         prompt = f"""
         Bạn là chatbot tư vấn tuyển sinh của trường XYZ.
-
+        Đây là đoạn hội thoại trước: 
+        {self.previous_context}
         === CÂU TRẢ LỜI CHÍNH THỨC ===
         {context}
 
@@ -104,10 +120,14 @@ class TrainingService:
             hoặc  
             “Nếu bạn quan tâm học bổng, mình có thể nói rõ các loại học bổng hiện có nhé!”
         """
-
+        full_response = ""
         async for chunk in self.llm.astream(prompt):
             yield chunk
+            full_response += chunk 
             await asyncio.sleep(0)  # Nhường event loop
+
+        self.memory.save_context({"input": query}, {"output": full_response})  
+        print("Saved to memory. Current messages:", len(self.memory.chat_memory.messages)) 
     # async def stream_response_from_hybrid(self, query: str, official_answer: str = "", additional_context: str = ""):
     #     """
     #     Stream phản hồi cho TIER 2 (hybrid giữa Training Q&A và Document).
