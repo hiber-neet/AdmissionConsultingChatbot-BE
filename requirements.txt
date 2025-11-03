@@ -14,7 +14,11 @@ pydantic-settings==2.1.0      # Settings management
 python-multipart==0.0.6       # File upload handling
 pydantic[email]
 
+# Compatible triple for LangChain 1.0+
+# (classic chains and memory are now in langchain-classic)
 langchain==1.0.0              # LLM orchestration framework
+langchain-core==1.0.2
+langchain-community==0.4.1
 langchain-google-genai==3.0.0 # Gemini integration
 
 
