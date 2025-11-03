@@ -2,7 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from app.core.config import settings
-from app.api.routes import knowledge_base_controller, chat_controller, auth_controller, profile_controller
+from app.api.routes import (
+    knowledge_base_controller,
+    chat_controller,
+    auth_controller,
+    profile_controller,
+    major_controller,
+    specialization_controller
+)
 from app.models.database import init_db
 import os
 app = FastAPI(
@@ -24,6 +31,8 @@ app.add_event_handler("startup",startup_event)
 
 app.include_router(auth_controller.router, prefix="/auth", tags=["Authentication"])
 app.include_router(profile_controller.router, prefix="/profile", tags=["Profile"])
+app.include_router(major_controller.router, prefix="/majors", tags=["Majors"])
+app.include_router(specialization_controller.router, prefix="/specializations", tags=["Specializations"])
 app.include_router(knowledge_base_controller.router, prefix="/knowledge", tags=["Knowledge Base"])
 app.include_router(chat_controller.router, prefix="/chat", tags=["Chat"])
 @app.get("/")

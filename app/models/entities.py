@@ -221,7 +221,7 @@ class Major(Base):
     __tablename__ = 'Major'
     
     major_id = Column(Integer, primary_key=True, autoincrement=True)
-    major_name = Column(String, nullable=False)
+    major_name = Column("name",String, nullable=False)
     created_by = Column(Integer, ForeignKey('Users.user_id'), nullable=True)
     
     admission_forms = relationship('AdmissionForm', back_populates='major', cascade="all, delete-orphan")
