@@ -69,32 +69,25 @@ def verify_user_access(requesting_user_id: int, target_user_id: int):
             detail="You don't have permission to access this profile"
         )
 
-async def get_current_user(request: Request, db: Session = Depends(get_db)) -> Users:
+async def get_current_user(request: Request, db: Session = Depends(get_db)) -> Optional[Users]:
     """
-    Get current user from token in Authorization header
-    """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials"
-    )
-    
+    Get current user from token in Authorization header.
+    Returns None if no token is provided or token is invalid.
+    """    
     auth_header = request.headers.get("Authorization")
     if not auth_header or "Bearer" not in auth_header:
-        raise credentials_exception
+        return None
         
-    token = auth_header.split(" ")[1]
     try:
+        token = auth_header.split(" ")[1]
         token_data = verify_token(token)
         if token_data.email is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-        
-    user = db.query(Users).filter(Users.email == token_data.email).first()
-    if user is None:
-        raise credentials_exception
-    
-    if not user.status:
-        raise HTTPException(status_code=400, detail="Inactive user")
-        
-    return user
+            return None
+            
+        user = db.query(Users).filter(Users.email == token_data.email).first()
+        if user is None or not user.status:
+            return None
+            
+        return user
+    except (JWTError, Exception):
+        return None

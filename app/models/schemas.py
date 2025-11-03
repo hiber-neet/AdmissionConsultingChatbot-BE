@@ -53,7 +53,7 @@ class RoleResponse(RoleBase):
 class UserBase(BaseModel):
     full_name: str
     email: EmailStr
-    status: Optional[str] = None
+    status: Optional[bool] = None
 
 
 class UserCreate(UserBase):
@@ -65,7 +65,7 @@ class UserUpdate(BaseModel):
     full_name: Optional[str]
     email: Optional[EmailStr]
     password: Optional[str]
-    status: Optional[str]
+    status: Optional[bool]
 
 
 class UserResponse(UserBase):
@@ -166,14 +166,50 @@ class CourseResponse(CourseBase):
 
 
 class MajorBase(BaseModel):
-    name: str
-    description: Optional[str]
-    curriculum_id: Optional[int]
-
+    major_name: str
 
 class MajorResponse(MajorBase):
     major_id: int
-    courses: Optional[List[CourseResponse]] = []
+
+    class Config:
+        orm_mode = True
+
+
+class SpecializationBase(BaseModel):
+    specialization_id: int
+    specialization_name: str
+
+    class Config:
+        orm_mode = True
+
+
+class ArticleBase(BaseModel):
+    article_id: int
+    title: str
+    description: Optional[str]
+    url: Optional[str]
+    create_at: Optional[date]
+    specialization: Optional[SpecializationBase]
+
+    class Config:
+        orm_mode = True
+
+
+class AdmissionFormBase(BaseModel):
+    form_id: int
+    fullname: str
+    email: str
+    phone_number: Optional[str]
+    campus: Optional[str]
+    submit_time: Optional[date]
+
+    class Config:
+        orm_mode = True
+
+
+class MajorDetailResponse(MajorResponse):
+    articles: List[ArticleBase] = []
+    admission_forms: List[AdmissionFormBase] = []
 
     class Config:
         orm_mode = True
@@ -298,6 +334,16 @@ class ChatSessionResponse(ChatSessionBase):
     class Config:
         orm_mode = True
 
+
+# ================= SPECIALIZATION =================
+class SpecializationResponse(BaseModel):
+    specialization_id: int
+    specialization_name: str
+    major_id: Optional[int]
+    articles: List['ArticleResponse'] = []
+
+    class Config:
+        orm_mode = True
 
 # ================= ARTICLE =================
 class ArticleCategoryBase(BaseModel):
