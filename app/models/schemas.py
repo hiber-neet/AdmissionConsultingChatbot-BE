@@ -59,6 +59,10 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str
     role_id: Optional[int] = None
+    permissions: Optional[List[int]] = None  # List of permission IDs
+    # Optional flags to set when creating profiles for certain permissions
+    consultant_is_leader: Optional[bool] = False
+    content_manager_is_leader: Optional[bool] = False
 
 
 class UserUpdate(BaseModel):
@@ -71,6 +75,7 @@ class UserUpdate(BaseModel):
 class UserResponse(UserBase):
     user_id: int
     role_id: Optional[int]
+    permissions: Optional[List[int]] = []  # List of permission IDs
 
     class Config:
         orm_mode = True
@@ -346,30 +351,39 @@ class SpecializationResponse(BaseModel):
         orm_mode = True
 
 # ================= ARTICLE =================
-class ArticleCategoryBase(BaseModel):
-    category_name: str
 
 
-class ArticleCategoryResponse(ArticleCategoryBase):
-    category_id: int
-
-    class Config:
-        orm_mode = True
-
-
-class ArticleBase(BaseModel):
+class ArticleCreate(BaseModel):
     title: str
-    content: str
-    status: Optional[bool]
-    author: str
-    view_count: Optional[int]
-    date_created: Optional[date]
-    tag: Optional[str]
-    category_id: Optional[int]
+    description: str
+    url: Optional[str] = None
+    major_id: Optional[int] = None
+    specialization_id: Optional[int] = None
 
+class ArticleUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    content: Optional[str] = None
+    url: Optional[str] = None
+    major_id: Optional[int] = None
+    specialization_id: Optional[int] = None
 
-class ArticleResponse(ArticleBase):
+class ArticleStatusUpdate(BaseModel):
+    status: str  # "draft", "published", or "cancelled"
+
+class ArticleResponse(BaseModel):
     article_id: int
+    title: str
+    description: str
+    url: Optional[str]
+    status: str
+    create_at: date
+    created_by: int
+    major_id: Optional[int] = None
+    specialization_id: Optional[int] = None
+    author_name: Optional[str] = None
+    major_name: Optional[str] = None
+    specialization_name: Optional[str] = None
 
     class Config:
         orm_mode = True

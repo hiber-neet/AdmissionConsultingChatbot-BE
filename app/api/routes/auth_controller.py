@@ -13,7 +13,7 @@ from app.core.security import (
 )
 from app.models.database import get_db
 from app.models.schemas import Token, UserCreate, UserResponse, LoginRequest
-from app.models.entities import Users
+from app.models.entities import Users, UserPermission
 
 router = APIRouter()
 
@@ -30,17 +30,102 @@ def register(*, db: Session = Depends(get_db), user_in: UserCreate) -> Any:
             detail="The user with this email already exists in the system.",
         )
     
+    # Create user with basic information
     user = Users(
         email=user_in.email,
         full_name=user_in.full_name,
         password=get_password_hash(user_in.password),
         role_id=user_in.role_id,
-        status= True,
+        status=True,
     )
     db.add(user)
+    # Flush so the new user's PK (user_id) is populated before creating UserPermission rows
+    # (Without flush/commit, user.user_id will be None for an autoincrement PK.)
+    db.flush()
+
+    # Add permissions if provided (validate permission ids first)
+    if user_in.permissions:
+        # Import models here to avoid circular import at module load
+        from app.models.entities import Permission as PermissionModel
+        from app.models.entities import ConsultantProfile as ConsultantProfileModel
+        from app.models.entities import ContentManagerProfile as ContentManagerProfileModel
+        from app.models.entities import AdmissionOfficialProfile as AdmissionOfficialProfileModel
+
+        # Track permission names present for creating related profiles
+        permission_names = set()
+
+        for permission_id in user_in.permissions:
+            perm = db.query(PermissionModel).filter(
+                PermissionModel.permission_id == permission_id
+            ).first()
+            if not perm:
+                # Invalid permission id — rollback and return informative error
+                db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Permission with id {permission_id} not found",
+                )
+
+            permission_names.add((perm.permission_name or "").strip().lower())
+
+            user_permission = UserPermission(
+                user_id=user.user_id,
+                permission_id=permission_id
+            )
+            db.add(user_permission)
+
+        # Create related profiles based on granted permissions
+        # Consultant profile
+        if any(name for name in permission_names if "consultant" in name):
+            consultant_profile = ConsultantProfileModel(
+                consultant_id=user.user_id,
+                # ConsultantProfile.status already defaults to True in the model, but set explicitly
+                status=True,
+                is_leader=bool(getattr(user_in, "consultant_is_leader", False))
+            )
+            db.add(consultant_profile)
+
+        # Content manager profile
+        if any(name for name in permission_names if "content" in name or "content_manager" in name or "content manager" in name):
+            content_manager_profile = ContentManagerProfileModel(
+                content_manager_id=user.user_id,
+                is_leader=bool(getattr(user_in, "content_manager_is_leader", False))
+            )
+            db.add(content_manager_profile)
+
+        # Admission official profile
+        if any(name for name in permission_names if "admission" in name or "official" in name or "admission_official" in name):
+            admission_profile = AdmissionOfficialProfileModel(
+                admission_official_id=user.user_id,
+                rating=0,
+                current_sessions=0,
+                max_sessions=10,
+                status="available"
+            )
+            db.add(admission_profile)
+    else:
+        # No permissions provided => create CustomerProfile for this user
+        from app.models.entities import CustomerProfile as CustomerProfileModel
+
+        customer_profile = CustomerProfileModel(
+            customer_id=user.user_id,
+            interest_id=None
+        )
+        db.add(customer_profile)
+
     db.commit()
     db.refresh(user)
-    return user
+    
+    # Prepare response with permissions
+    response = {
+        "user_id": user.user_id,
+        "email": user.email,
+        "full_name": user.full_name,
+        "status": user.status,
+        "role_id": user.role_id,
+        "permissions": [p.permission_id for p in user.permissions] if user.permissions else []
+    }
+    return response
 
 
 @router.post("/login", response_model=Token)

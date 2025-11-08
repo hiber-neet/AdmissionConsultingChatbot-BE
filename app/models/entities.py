@@ -451,6 +451,8 @@ class Article(Base):
     title = Column(String)
     description = Column(String)
     url = Column(String)
+    # content = Column(Text)
+    status = Column(String, default="draft")  # Values: draft, published, cancelled
     create_at = Column(Date, default=datetime.now)
     created_by = Column(Integer, ForeignKey("Users.user_id"))
     major_id = Column(Integer, ForeignKey('Major.major_id'), nullable=True)
