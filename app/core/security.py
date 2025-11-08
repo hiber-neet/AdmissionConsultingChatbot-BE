@@ -69,6 +69,20 @@ def verify_user_access(requesting_user_id: int, target_user_id: int):
             detail="You don't have permission to access this profile"
         )
 
+def verify_content_manager(user: Users) -> bool:
+    """
+    Verify if user is a content manager
+    """
+    return user.role.role_id == 3 if user and user.role else False
+
+def verify_content_manager_leader(user: Users) -> bool:
+    """
+    Verify if user is a content manager leader
+    """
+    return (user.role.role_id == 3 and
+            user.content_manager_profile and 
+            user.content_manager_profile.is_leader) if user and user.role else False
+
 async def get_current_user(request: Request, db: Session = Depends(get_db)) -> Optional[Users]:
     """
     Get current user from token in Authorization header.
