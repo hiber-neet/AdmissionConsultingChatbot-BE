@@ -9,7 +9,7 @@ from app.models.entities import Article, Users, Major, Specialization
 from typing import List, Optional
 from app.core.security import (
     get_current_user, verify_content_manager,
-    verify_content_manager_leader
+    verify_content_manager_leader, is_admin, has_permission
 )
 from datetime import datetime
 from sqlalchemy import or_
@@ -105,9 +105,10 @@ async def get_articles(
     current_user: Optional[Users] = Depends(get_current_user)
 ):
     """
-    Get articles based on user role:
-    - Content managers can see all articles
-    - Others can only see published articles
+    Get articles based on user permissions:
+    - Admin: can see all articles (any status)
+    - Content manager: can see their own articles (any status) + all published articles
+    - Other users: can only see published articles
     """
     # Base query with joins for additional information
     query = (
@@ -117,9 +118,29 @@ async def get_articles(
         .outerjoin(Users, Users.user_id == Article.created_by)
     )
 
-    # Add filters based on user role
-    if not current_user or not verify_content_manager(current_user):
-        # Public users can only see published articles
+    # Apply filters based on permissions
+    if not current_user:
+        # Not authenticated: only published articles
+        query = query.filter(Article.status == "published")
+    elif is_admin(current_user):
+        # Admin: can see all articles (no filter)
+        pass
+    elif (
+        has_permission(current_user, "content_manager")
+        or has_permission(current_user, "content manager")
+        or (
+            current_user
+            and current_user.permissions
+            and any(
+                (p.permission_name and "content" in p.permission_name.lower())
+                for p in current_user.permissions
+            )
+        )
+    ):
+        # Content manager: can see all articles (no filter)
+        pass
+    else:
+        # Other users: only published articles
         query = query.filter(Article.status == "published")
 
     articles = query.all()
@@ -152,9 +173,11 @@ async def get_article(
     current_user: Optional[Users] = Depends(get_current_user)
 ):
     """
-    Get a specific article:
-    - Content managers can see any article
-    - Others can only see published articles
+    Get a specific article based on user permissions:
+    - Admin: can see any article (any status)
+    - Content manager: can see their own articles (any status) + published articles
+    - Content manager author: can see their own articles (any status)
+    - Other users: can only see published articles
     """
     article = (
         db.query(Article)
@@ -172,10 +195,36 @@ async def get_article(
         )
 
     # Check access permission
-    if (not current_user or not verify_content_manager(current_user)) and article.status != "published":
+    can_view = False
+    
+    if not current_user:
+        # Not authenticated: only published articles
+        can_view = article.status == "published"
+    elif is_admin(current_user):
+        # Admin: can view any article
+        can_view = True
+    elif (
+        has_permission(current_user, "content_manager")
+        or has_permission(current_user, "content manager")
+        or (
+            current_user
+            and current_user.permissions
+            and any(
+                (p.permission_name and "content" in p.permission_name.lower())
+                for p in current_user.permissions
+            )
+        )
+    ):
+        # Content manager: can view any article (any status)
+        can_view = True
+    else:
+        # Other users: only published articles
+        can_view = article.status == "published"
+    
+    if not can_view:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This article is not published"
+            detail="You don't have permission to view this article"
         )
 
     return ArticleResponse(

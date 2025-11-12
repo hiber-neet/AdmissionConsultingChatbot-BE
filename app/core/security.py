@@ -69,19 +69,115 @@ def verify_user_access(requesting_user_id: int, target_user_id: int):
             detail="You don't have permission to access this profile"
         )
 
+def is_admin(user: Users) -> bool:
+    """
+    Check if user is admin based on permission (not role).
+    Admin has full permissions.
+    """
+    if not user or not user.permissions:
+        return False
+    
+    # Check if user has "admin" permission
+    permission_names = {p.permission_name.lower() for p in user.permissions if p.permission_name}
+    return "admin" in permission_names
+
+def has_permission(user: Users, permission_name: str) -> bool:
+    """
+    Check if user has a specific permission by name.
+    Admins bypass and always have permission.
+    
+    Args:
+        user: Users object with permissions relationship loaded
+        permission_name: Name of permission to check (e.g., "content_manager", "consultant", "admin")
+    
+    Returns:
+        True if user is admin or has the permission, False otherwise
+    """
+    if not user:
+        return False
+    
+    # Admin has all permissions
+    if is_admin(user):
+        return True
+    
+    # Check if user has the specific permission
+    if not user.permissions:
+        return False
+    
+    permission_names = {p.permission_name.lower() for p in user.permissions if p.permission_name}
+    return permission_name.lower() in permission_names
+
 def verify_content_manager(user: Users) -> bool:
     """
-    Verify if user is a content manager
+    Verify if user is a content manager or admin.
+    Checks permissions instead of role_id.
+    Admin role has full permissions.
     """
-    return user.role.role_id == 3 if user and user.role else False
+    if not user:
+        return False
+    
+    # Admin has full access
+    if is_admin(user):
+        return True
+    
+    # Check for content manager permission
+    return has_permission(user, "Content Manager")
 
 def verify_content_manager_leader(user: Users) -> bool:
     """
-    Verify if user is a content manager leader
+    Verify if user is a content manager leader or admin.
+    Checks if user has content_manager permission AND is_leader flag is true.
+    Admin role bypasses this check.
     """
-    return (user.role.role_id == 3 and
-            user.content_manager_profile and 
-            user.content_manager_profile.is_leader) if user and user.role else False
+    if not user:
+        return False
+    
+    # Admin has full access (bypass leader check)
+    if is_admin(user):
+        return True
+    
+    # Check if user has content_manager permission
+    if not has_permission(user, "Content Manager"):
+        return False
+    
+    # Check if is_leader flag is set
+    return (user.content_manager_profile and 
+            user.content_manager_profile.is_leader)
+
+def verify_consultant(user: Users) -> bool:
+    """
+    Verify if user is a consultant or admin.
+    Checks permissions instead of role_id.
+    """
+    if not user:
+        return False
+    
+    # Admin has full access
+    if is_admin(user):
+        return True
+    
+    # Check for consultant permission
+    return has_permission(user, "consultant")
+
+def verify_consultant_leader(user: Users) -> bool:
+    """
+    Verify if user is a consultant leader or admin.
+    Checks if user has consultant permission AND is_leader flag is true.
+    """
+    if not user:
+        return False
+    
+    # Admin has full access (bypass leader check)
+    if is_admin(user):
+        return True
+    
+    # Check if user has consultant permission
+    if not has_permission(user, "consultant"):
+        return False
+    
+    # Check if is_leader flag is set
+    return (user.consultant_profile and 
+            user.consultant_profile.is_leader)
 
 async def get_current_user(request: Request, db: Session = Depends(get_db)) -> Optional[Users]:
     """
