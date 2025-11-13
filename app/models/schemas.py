@@ -65,6 +65,22 @@ class UserCreate(UserBase):
     content_manager_is_leader: Optional[bool] = False
 
 
+class PermissionChangeRequest(BaseModel):
+    user_id: int
+    permission_id: int
+    consultant_is_leader: Optional[bool] = False
+    content_manager_is_leader: Optional[bool] = False
+
+
+class PermissionRevokeRequest(BaseModel):
+    user_id: int
+    permission_id: int
+
+
+class BanUserRequest(BaseModel):
+    user_id: int
+
+
 class UserUpdate(BaseModel):
     full_name: Optional[str]
     email: Optional[EmailStr]

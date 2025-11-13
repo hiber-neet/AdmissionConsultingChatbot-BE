@@ -19,8 +19,8 @@ async def get_user_profile(
     # Check if user has permission to access this profile
     verify_user_access(current_user.user_id, user_id)
 
-    # Get user with role information
-    user = db.query(Users).join(Role).filter(Users.user_id == user_id).first()
+    # Get user with role information (using outer join to support null role_id)
+    user = db.query(Users).outerjoin(Role).filter(Users.user_id == user_id).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

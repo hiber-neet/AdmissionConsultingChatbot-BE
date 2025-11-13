@@ -9,7 +9,8 @@ from app.api.routes import (
     profile_controller,
     major_controller,
     specialization_controller,
-    article_controller
+    article_controller,
+    users_controller
 )
 from app.models.database import init_db
 import os
@@ -29,8 +30,8 @@ async def startup_event():
     init_db()
 app.add_event_handler("startup",startup_event)
 
-
 app.include_router(auth_controller.router, prefix="/auth", tags=["Authentication"])
+app.include_router(users_controller.router, prefix="/users", tags=["Users"])
 app.include_router(profile_controller.router, prefix="/profile", tags=["Profile"])
 app.include_router(major_controller.router, prefix="/majors", tags=["Majors"])
 app.include_router(specialization_controller.router, prefix="/specializations", tags=["Specializations"])
