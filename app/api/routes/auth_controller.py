@@ -9,10 +9,15 @@ from app.core.security import (
     verify_password,
     ACCESS_TOKEN_EXPIRE_MINUTES,
     get_current_user,
-    verify_user_access
+    verify_user_access,
 )
 from app.models.database import get_db
-from app.models.schemas import Token, UserCreate, UserResponse, LoginRequest
+from app.models.schemas import (
+    Token,
+    UserCreate,
+    UserResponse,
+    LoginRequest,
+)
 from app.models.entities import Users, UserPermission
 
 router = APIRouter()
