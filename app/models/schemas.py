@@ -63,20 +63,21 @@ class UserCreate(UserBase):
     # Optional flags to set when creating profiles for certain permissions
     consultant_is_leader: Optional[bool] = False
     content_manager_is_leader: Optional[bool] = False
+    # Optional interest information to create CustomerProfile at registration
+    interest_desired_major: Optional[str] = None
+    interest_region: Optional[str] = None
 
 
 class PermissionChangeRequest(BaseModel):
     user_id: int
-    permission_id: int
+    permission_ids: List[int]
     consultant_is_leader: Optional[bool] = False
     content_manager_is_leader: Optional[bool] = False
 
 
 class PermissionRevokeRequest(BaseModel):
     user_id: int
-    permission_id: int
-
-
+    permission_ids: List[int]
 class BanUserRequest(BaseModel):
     user_id: int
 
@@ -416,6 +417,27 @@ class PersonalizedRecommendationBase(BaseModel):
 
 class PersonalizedRecommendationResponse(PersonalizedRecommendationBase):
     recommendation_id: int
+
+    class Config:
+        orm_mode = True
+
+
+# ================= RIASEC =================
+class RiasecResultBase(BaseModel):
+    score_realistic: int
+    score_investigative: int
+    score_artistic: int
+    score_social: int
+    score_enterprising: int
+    score_conventional: int
+    result: str
+
+class RiasecResultCreate(RiasecResultBase):
+    pass
+
+class RiasecResult(RiasecResultBase):
+    result_id: int
+    customer_id: int
 
     class Config:
         orm_mode = True

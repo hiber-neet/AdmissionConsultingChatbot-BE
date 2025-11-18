@@ -10,7 +10,8 @@ from app.api.routes import (
     major_controller,
     specialization_controller,
     article_controller,
-    users_controller
+    users_controller,
+    riasec_controller
 )
 from app.models.database import init_db
 import os
@@ -38,6 +39,8 @@ app.include_router(specialization_controller.router, prefix="/specializations", 
 app.include_router(article_controller.router, prefix="/articles", tags=["Articles"])
 app.include_router(knowledge_base_controller.router, prefix="/knowledge", tags=["Knowledge Base"])
 app.include_router(chat_controller.router, prefix="/chat", tags=["Chat"])
+app.include_router(riasec_controller.router, prefix="/riasec", tags=["RIASEC"])
+
 @app.get("/")
 async def root():
     return {"message": "FastAPI + LangChain + Qdrant + OpenAI API"}
