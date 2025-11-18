@@ -110,11 +110,23 @@ def register(*, db: Session = Depends(get_db), user_in: UserCreate) -> Any:
             db.add(admission_profile)
     else:
         # No permissions provided => create CustomerProfile for this user
+        # Optionally create an Interest record if interest data was provided during registration
         from app.models.entities import CustomerProfile as CustomerProfileModel
+        from app.models.entities import Interest as InterestModel
+
+        interest_obj = None
+        if getattr(user_in, "interest_desired_major", None) or getattr(user_in, "interest_region", None):
+            interest_obj = InterestModel(
+                desired_major=getattr(user_in, "interest_desired_major", None),
+                region=getattr(user_in, "interest_region", None),
+            )
+            db.add(interest_obj)
+            # flush so interest_id is populated
+            db.flush()
 
         customer_profile = CustomerProfileModel(
             customer_id=user.user_id,
-            interest_id=None
+            interest_id=interest_obj.interest_id if interest_obj else None
         )
         db.add(customer_profile)
 
