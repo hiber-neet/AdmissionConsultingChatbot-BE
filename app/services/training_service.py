@@ -1,3 +1,5 @@
+from datetime import datetime
+from typing import Dict, List
 from langchain_google_genai import GoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_text_splitters  import RecursiveCharacterTextSplitter
 from langchain_classic.memory import ConversationBufferMemory
@@ -7,7 +9,12 @@ import os
 import uuid
 import asyncio
 from sqlalchemy.orm import Session
-from app.models.entities import TrainingQuestionAnswer
+from app.models.entities import ChatInteraction, ChatSession, ParticipateChatSession, TrainingQuestionAnswer
+from app.models.database import SessionLocal
+from sqlalchemy.exc import SQLAlchemyError
+from app.services.memory_service import MemoryManager
+
+memory_service = MemoryManager()
 
 class TrainingService:
     def __init__(self):
@@ -17,7 +24,6 @@ class TrainingService:
             google_api_key=self.gemini_api_key,
             temperature=0.7
         )
-        self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
         self.embeddings = GoogleGenerativeAIEmbeddings(
                     model="models/gemini-embedding-001",
                     google_api_key=self.gemini_api_key
@@ -26,7 +32,6 @@ class TrainingService:
             host=os.getenv("QDRANT_HOST", "localhost"),
             port=int(os.getenv("QDRANT_PORT", 6333))
         )
-        self.previous_context = self.memory.load_memory_variables({}).get("chat_history", "")
         self.training_qa_collection = "training_qa"
         self.documents_collection = "knowledge_base_documents"
         self._init_collections()
@@ -47,59 +52,260 @@ class TrainingService:
             )
         except:
             pass
-    def llm_relevance_check(self, query: str, matched_question: str, answer: str) -> bool:
-        prompt = f"""
-        Câu hỏi người dùng: "{query}"
-        Câu hỏi trong cơ sở dữ liệu: "{matched_question}"
-        Câu trả lời: "{answer}"
-        Hỏi: Hai câu hỏi này có cùng ý nghĩa không?
-        Trả lời "true" hoặc "false".
-        """
-        result = self.llm(prompt)
-        return "true" in result     
 
-    async def stream_response_from_context(self, query: str, context: str):
-        memory_vars = self.memory.load_memory_variables({})
-        prev = memory_vars.get("chat_history", "")
-        print("Content History (context):", self.previous_context)
-        """Stream phản hồi từ Gemini, từng chunk một."""
-        prompt = f"""Bạn là một chatbot tư vấn tuyển sinh chuyên nghiệp của trường XYZ
-        Đây là đoạn hội thoại trước: 
-        {self.previous_context}
-        === THÔNG TIN THAM KHẢO ===
-        {context}
-        === CÂU HỎI ===
-        {query}
-        === HƯỚNG DẪN ===
-        - Trả lời bằng tiếng Việt
-        - Thân thiện, chuyên nghiệp
-        - Dựa vào thông tin tham khảo trên được cung cấp
-        - Bạn là chatbot tư vấn tuyển sinh của trường xyz, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
-        - Nếu không tìm thấy thông tin, hãy nói rõ và gợi ý liên hệ trực tiếp nhân viên tư vấn
-        - Không bịa thêm thông tin ngoài context
-        - Nếu câu hỏi chỉ là chào hỏi, hỏi thời tiết, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
-        - Có thể **diễn đạt lại câu hỏi hoặc thông tin** một cách nhẹ nhàng, tự nhiên để người dùng dễ hiểu hơn, **nhưng tuyệt đối không thay đổi ý nghĩa hay thêm dữ kiện mới.**
-        - Khi có thể, hãy **giải thích thêm bối cảnh hoặc gợi ý bước tiếp theo**, ví dụ:  
-            “Bạn muốn mình gửi danh sách ngành đào tạo kèm chuyên ngành chi tiết không?”  
-            hoặc  
-            “Nếu bạn quan tâm học bổng, mình có thể nói rõ các loại học bổng hiện có nhé!”
+    def create_chat_session(self, user_id: int, session_type: str = "chatbot") -> int:
         """
-        full_response = ""
-        async for chunk in self.llm.astream(prompt):
-            yield chunk
-            full_response += chunk
-            await asyncio.sleep(0)  # Nhường event loop
-        self.memory.save_context({"input": query}, {"output": full_response})  
-        print("Saved to memory. Current messages:", len(self.memory.chat_memory.messages)) 
-    async def stream_response_from_qa(self, query: str, context: str):
+        Tạo chat session mới
+        
+        Args:
+            user_id: ID của user
+            session_type: "chatbot" hoặc "live"
+        
+        Returns:
+            session_id: ID của session vừa tạo
+        """
+        db = SessionLocal()
+        try:
+            session = ChatSession(
+                session_type=session_type,
+                start_time=datetime.datetime.now()
+            )
+            db.add(session)
+            db.flush()
+            
+            # Add user vào participate table
+            participate = ParticipateChatSession(
+                user_id=user_id,
+                session_id=session.chat_session_id
+            )
+            db.add(participate)
+            db.commit()
+            
+            return session.chat_session_id
+        except SQLAlchemyError as e:
+            db.rollback()
+            print(f"Error creating session: {e}")
+            raise
+        finally:
+            db.close()
+
+    def get_session_history(self, session_id: int, limit: int = 50) -> List[Dict]:
+        """
+        Lấy lịch sử chat của session
+        
+        Returns:
+            List of messages [{message_text, timestamp, is_from_bot}, ...]
+        """
+        db = SessionLocal()
+        try:
+            interactions = db.query(ChatInteraction).filter(
+                ChatInteraction.session_id == session_id
+            ).order_by(
+                ChatInteraction.timestamp.asc()
+            ).limit(limit).all()
+            
+            return [
+                {
+                    "message_text": i.message_text,
+                    "timestamp": i.timestamp.isoformat() if i.timestamp else None,
+                    "is_from_bot": i.is_from_bot,
+                    "rating": i.rating
+                }
+                for i in interactions
+            ]
+        finally:
+            db.close()
+    
+    def get_user_sessions(self, user_id: int) -> List[Dict]:
+        """
+        Lấy tất cả sessions của user (để hiển thị recent chats)
+        
+        Returns:
+            List of sessions với preview message cuối cùng
+        """
+        db = SessionLocal()
+        try:
+            sessions = db.query(ChatSession).join(
+                ParticipateChatSession
+            ).filter(
+                ParticipateChatSession.user_id == user_id
+            ).order_by(
+                ChatSession.start_time.desc()
+            ).all()
+            
+            result = []
+            for session in sessions:
+                # Lấy message cuối cùng làm preview
+                last_msg = db.query(ChatInteraction).filter(
+                    ChatInteraction.session_id == session.chat_session_id
+                ).order_by(
+                    ChatInteraction.timestamp.desc()
+                ).first()
+                
+                result.append({
+                    "session_id": session.chat_session_id,
+                    "session_type": session.session_type,
+                    "start_time": session.start_time.isoformat() if session.start_time else None,
+                    "last_message_preview": last_msg.message_text[:50] + "..." if last_msg else "",
+                    "last_message_time": last_msg.timestamp.isoformat() if last_msg and last_msg.timestamp else None
+                })
+            
+            return result
+        finally:
+            db.close()
+
+    # ---------------------------
+    # Query enrichment: dùng chat_history + last bot question để build a full query
+    # ---------------------------
+    async def enrich_query(self, session_id: str, user_message: str) -> str:
+        memory = memory_service.get_memory(session_id)
+        mem_vars = memory.load_memory_variables({})
+        chat_history = mem_vars.get("chat_history", "")
+
+        prompt = f"""
+        Bạn là một trợ lý giúp chuyển các câu trả lời của người dùng thành các truy vấn tìm kiếm đầy đủ cho chatbot RAG tư vấn tuyển sinh.
+
+        Cuộc hội thoại gần đây (theo thứ tự từ cũ đến mới):
+        {chat_history}
+
+        Phản hồi mới nhất của người dùng: "{user_message}"
+
+        Nhiệm vụ: Dựa trên "cuộc hội thoại gần đây" và "phản hồi mới nhất của người dùng", bạn hãy đảm bảo tạo ra **một câu truy vấn tìm kiếm**, ngắn gọn, rõ ràng, cụ thể (bằng tiếng Việt), thể hiện đúng ý định của người dùng để gửi cho chatbot rag tư vấn để nó có thể hiểu yêu cầu của người dùng. "Chỉ tạo truy vấn nếu phản hồi của người dùng là phần tiếp nối hoặc làm rõ nội dung trong hội thoại trước đó.", nếu phản hồi của người dùng không trả lời hoặc không liên quan cho cuộc hội thoại gần đây thì hãy trả về chuỗi rỗng.
+
+        Chỉ trả về **một dòng truy vấn duy nhất** (không thêm nội dung khác).  
+        Ví dụ:
+        - "Thông tin về ngành Công nghệ Thông tin tại trường XYZ"  
+        - "Học phí ngành CNTT hệ chính quy năm 2025 tại trường XYZ"
+        """
+        # assume async predict exists
+        enriched = await self.llm.ainvoke(prompt)
+        # fallback: if empty use original
+        enriched_txt = (enriched or "").strip().splitlines()[0] if enriched else user_message
+        return enriched_txt   
+
+    # ---------------------------
+    # LLM relevance check: ensure enriched_query actually matches the training QA
+    # ---------------------------
+    async def llm_relevance_check(self, enriched_query: str, matched_question: str, answer: str) -> bool:
+        prompt = f"""
+        Bạn là chuyên gia đánh giá giữa câu hỏi tìm kiếm, câu hỏi trong cơ sở dữ liệu và câu trả lời cho 1 hệ thống chat RAG tuyển sinh, hãy suy luận. 
+
+        Câu hỏi tìm kiếm (đã chuẩn hóa): "{enriched_query}"
+        Câu hỏi DB: "{matched_question}"
+        Câu trả lời chính thức: "{answer}"
+
+        Hãy trả lời duy nhất chỉ một từ: "true" nếu câu hỏi DB phù hợp và trả lời đó hợp lý cho truy vấn tìm kiếm; "false" nếu chỉ trùng từ khóa hoặc không phù hợp.
+        """
+        res = await self.llm.ainvoke(prompt)
+        if not res:
+            return False
+        r = res.strip().lower()
+        return ("đúng" in r) or ("true" in r) or (r.startswith("đúng")) or (r.startswith("true"))
+
+    async def load_session_history_to_memory(self, session_id: int, db: Session):
+        memory = memory_service.get_memory(session_id)
+
+        # Lấy lịch sử chat theo thứ tự thời gian
+        interactions = (
+            db.query(ChatInteraction)
+            .filter(ChatInteraction.session_id == session_id)
+            .order_by(ChatInteraction.timestamp.asc())
+            .all()
+        )
+
+        last_user_msg = None
+        for inter in interactions:
+            if not inter.is_from_bot:
+                # user message
+                last_user_msg = inter.message_text
+            else:
+                # bot message -> kết hợp với user message trước đó (nếu có)
+                memory.save_context(
+                    {"input": last_user_msg or ""},
+                    {"output": inter.message_text}
+                )
+                last_user_msg = None
+
+        # Nếu cuối cùng là tin nhắn user chưa được phản hồi
+        if last_user_msg:
+            memory.save_context({"input": last_user_msg}, {"output": ""})
+
+    async def stream_response_from_context(self, query: str, context: str, session_id: int = 1, user_id: int = 1):
+        db = SessionLocal()
+        
+        try:
+            # 🧩 1. Lưu tin nhắn người dùng
+            user_msg = ChatInteraction(
+                message_text=query,
+                timestamp=datetime.now(),
+                rating=None,
+                is_from_bot=False,
+                sender_id=user_id,
+                session_id=session_id
+            )
+            db.add(user_msg)
+            db.flush()  # flush để lấy ID nếu cần liên kết sau
+        
+            memory = memory_service.get_memory(session_id)
+            mem_vars = memory.load_memory_variables({})
+            chat_history = mem_vars.get("chat_history", "")
+            """Stream phản hồi từ Gemini, từng chunk một."""
+            prompt = f"""Bạn là một chatbot tư vấn tuyển sinh chuyên nghiệp của trường XYZ
+            Đây là đoạn hội thoại trước: 
+            {chat_history}
+            === THÔNG TIN THAM KHẢO ===
+            {context}
+            === CÂU HỎI ===
+            {query}
+            === HƯỚNG DẪN ===
+            - Trả lời bằng tiếng Việt
+            - Thân thiện, chuyên nghiệp
+            - Dựa vào thông tin tham khảo trên được cung cấp
+            - Bạn là chatbot tư vấn tuyển sinh của trường xyz, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
+            - Nếu không tìm thấy thông tin, hãy nói rõ và gợi ý liên hệ trực tiếp nhân viên tư vấn
+            - Không bịa thêm thông tin ngoài context
+            - Nếu câu hỏi chỉ là chào hỏi, hỏi thời tiết, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
+            - Có thể **diễn đạt lại câu hỏi hoặc thông tin** một cách nhẹ nhàng, tự nhiên để người dùng dễ hiểu hơn, **nhưng tuyệt đối không thay đổi ý nghĩa hay thêm dữ kiện mới.**
+            - Khi có thể, hãy **giải thích thêm bối cảnh hoặc gợi ý bước tiếp theo**, ví dụ:  
+                “Bạn muốn mình gửi danh sách ngành đào tạo kèm chuyên ngành chi tiết không?”  
+                hoặc  
+                “Nếu bạn quan tâm học bổng, mình có thể nói rõ các loại học bổng hiện có nhé!”
+            """
+            full_response = ""
+            async for chunk in self.llm.astream(prompt):
+                yield chunk
+                full_response += chunk
+                await asyncio.sleep(0)  # Nhường event loop
+            memory.save_context({"input": query}, {"output": full_response})  
+            
+            # === 🔥 Lưu bot response vào DB ===
+            bot_msg = ChatInteraction(
+                message_text=full_response,
+                timestamp=datetime.now(),
+                rating=None,
+                is_from_bot=True,
+                sender_id=None,
+                session_id=session_id
+            )
+            db.add(bot_msg)
+
+            # 🧩 5. Commit 1 lần duy nhất
+            db.commit()
+            print(f"💾 Saved both user+bot messages for session {session_id}")
+        except SQLAlchemyError as e:
+            db.rollback()
+            print(f" Database error during chat transaction: {e}")
+        finally:
+            db.close()
+    async def stream_response_from_qa(self, query: str, context: str, session_id: int = 1, user_id: int = 1):
       
-        memory_vars = self.memory.load_memory_variables({})
-        prev = memory_vars.get("chat_history", "")
-        print("Loaded memory (context):", bool(prev), "chars:", len(prev))
+        memory = memory_service.get_memory(session_id)
+        mem_vars = memory.load_memory_variables({})
+        chat_history = mem_vars.get("chat_history", "")
         prompt = f"""
         Bạn là chatbot tư vấn tuyển sinh của trường XYZ.
         Đây là đoạn hội thoại trước: 
-        {self.previous_context}
+        {chat_history}
         === CÂU TRẢ LỜI CHÍNH THỨC ===
         {context}
 
@@ -126,41 +332,9 @@ class TrainingService:
             full_response += chunk 
             await asyncio.sleep(0)  # Nhường event loop
 
-        self.memory.save_context({"input": query}, {"output": full_response})  
+        memory.save_context({"input": query}, {"output": full_response})  
         print("Saved to memory. Current messages:", len(self.memory.chat_memory.messages)) 
-    # async def stream_response_from_hybrid(self, query: str, official_answer: str = "", additional_context: str = ""):
-    #     """
-    #     Stream phản hồi cho TIER 2 (hybrid giữa Training Q&A và Document).
-    #     - official_answer: câu trả lời chính (từ training QA)
-    #     - additional_context: thông tin mở rộng từ tài liệu (document)
-    #     """
-
-    #     prompt = f"""
-    #     Bạn là chatbot tư vấn tuyển sinh chuyên nghiệp của trường Đại học XYZ.
-
-    #     === CÂU TRẢ LỜI CHÍNH (từ cơ sở huấn luyện do chuyên viên cung cấp) ===
-    #     {official_answer.strip() or "Không có dữ liệu huấn luyện cho câu hỏi này."}
-
-    #     === THÔNG TIN THAM KHẢO BỔ SUNG (từ tài liệu chính thức) ===
-    #     {additional_context.strip() or "Không có thông tin bổ sung."}
-
-    #     === CÂU HỎI NGƯỜI DÙNG ===
-    #     {query.strip()}
-
-    #     === HƯỚNG DẪN TRẢ LỜI ===
-    #     - Ưu tiên sử dụng **Câu trả lời chính** làm nội dung trung tâm khi bạn đã đánh giá kĩ càng, rõ ràng context có thật sự đúng với câu hỏi, yêu cầu của người dùng hay không, bạn có thể hỏi ngược lại người dùng nếu câu hỏi chưa khiến bạn chắc chắn, nếu phần CÂU TRẢ LỜI CHÍNH THỨC ở trên đã chứa thông tin trực tiếp liên quan, hãy sử dụng nguyên văn nội dung đó để trả lời.
-    #     - Có thể **mở rộng hoặc làm rõ** bằng thông tin từ “Thông tin tham khảo bổ sung” 
-    #     nếu thấy phù hợp, **nhưng không được thay đổi nội dung gốc**.
-    #     - Trả lời bằng tiếng Việt, tự nhiên, thân thiện, dễ hiểu.
-    #     - Không bịa thêm thông tin.
-    #     - Bạn là chatbot tư vấn tuyển sinh của trường xyz, nhớ kiểm tra kĩ rõ ràng câu hỏi, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
-    #     - Nếu câu hỏi chỉ là chào hỏi, hỏi thời tiết, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
-    #     - Nếu câu hỏi quá mơ hồ, hãy hỏi lại để rõ hơn và chi tiết hơn về câu hỏi
-    #     """
-
-    #     async for chunk in self.llm.astream(prompt):
-    #         yield chunk
-    #         await asyncio.sleep(0) 
+    
     def add_document(self, document_id: int, content: str, metadata: dict = None):
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,      # Size optimal cho Vietnamese
@@ -354,31 +528,8 @@ class TrainingService:
                 "sources": []
             }
         
-        # TIER 2: Good match (0.7 < score <= 0.8)
-        # Dùng answer nhưng thêm document context để richer
-        # elif qa_results and qa_results[0].score > 0.7:
-        #     top_match = qa_results[0]
-            
-        #     # Thêm document context nếu available
-        #     doc_results = self.search_documents(query, top_k=2)
-        #     additional_context = "\n\n".join(
-        #         [r.payload.get("chunk_text", "") for r in doc_results]
-        #     )
-            
-            
-            
-        #     return {
-        #         "response_official_answer": top_match.payload.get("answer_text"),
-        #         "additional_context": additional_context,
-        #         "response_source": "training_qa",
-        #         "confidence": top_match.score,
-        #         "top_match": top_match,
-        #         "intent_id": top_match.payload.get("intent_id"),
-        #         "question_id": top_match.payload.get("question_id"),
-        #         "sources": [r.payload.get("document_id") for r in doc_results]
-        #     }
         
-        # TIER 3: No training Q&A match, try documents
+        # TIER 2: No training Q&A match, try documents
         else: doc_results = self.search_documents(query, top_k=5)
         return {
                 "response": doc_results,
@@ -389,16 +540,7 @@ class TrainingService:
                 "sources": [r.payload.get("document_id") for r in doc_results]
             }
         
-        # TIER 4: Fallback - nothing found
-        # fallback_response = """Xin lỗi, tôi không tìm thấy thông tin liên quan đến câu hỏi của bạn trong cơ sở dữ liệu.
-
-        # Để được hỗ trợ tốt hơn, bạn có thể:
-        # 1. Đặt câu hỏi chi tiết hơn
-        # 2. Liên hệ trực tiếp với phòng Tuyển sinh qua Live Chat
-        # 3. Gọi hotline: [number]
-        # 4. Email: [email]
-
-        # Chúng tôi sẵn sàng giúp đỡ!"""
+      
 
     
 
