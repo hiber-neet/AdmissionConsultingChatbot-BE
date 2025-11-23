@@ -11,7 +11,9 @@ from app.api.routes import (
     specialization_controller,
     article_controller,
     users_controller,
-    riasec_controller
+    riasec_controller,
+    permissions_controller,
+    academic_score_controller
 )
 from app.models.database import init_db
 import os
@@ -40,6 +42,8 @@ app.include_router(article_controller.router, prefix="/articles", tags=["Article
 app.include_router(knowledge_base_controller.router, prefix="/knowledge", tags=["Knowledge Base"])
 app.include_router(chat_controller.router, prefix="/chat", tags=["Chat"])
 app.include_router(riasec_controller.router, prefix="/riasec", tags=["RIASEC"])
+app.include_router(permissions_controller.router, prefix="/permissions", tags=["Permissions"])
+app.include_router(academic_score_controller.router, prefix="/academic-score", tags=["Academic Score"])
 
 @app.get("/")
 async def root():

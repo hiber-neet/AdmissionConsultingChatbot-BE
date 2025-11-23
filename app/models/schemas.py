@@ -131,6 +131,24 @@ class InterestResponse(InterestBase):
         orm_mode = True
 
 
+# ================= ACADEMIC SCORE =================
+class AcademicScoreBase(BaseModel):
+    subject_name: str
+    score: float
+
+
+class AcademicScoreCreate(AcademicScoreBase):
+    pass
+
+
+class AcademicScoreResponse(AcademicScoreBase):
+    score_id: int
+    customer_id: int
+
+    class Config:
+        orm_mode = True
+
+
 # ================= CONSULTANT PROFILE =================
 class ConsultantProfileBase(BaseModel):
     rating: Optional[int]

@@ -107,6 +107,12 @@ def has_permission(user: Users, permission_name: str) -> bool:
     permission_names = {p.permission_name.lower() for p in user.permissions if p.permission_name}
     return permission_name.lower() in permission_names
 
+def is_admin_or_admission_official(user: Users) -> bool:
+    """Check if user is an admin or an admission official."""
+    if not user:
+        return False
+    return has_permission(user, "Admin") or has_permission(user, "Admission Official")
+
 def verify_content_manager(user: Users) -> bool:
     """
     Verify if user is a content manager or admin.

@@ -7,9 +7,42 @@ from app.models.schemas import (
     BanUserRequest,
 )
 from app.models.entities import Users, UserPermission
-from app.core.security import has_permission, get_current_user
+from app.core.security import has_permission, get_current_user, is_admin_or_admission_official
+from sqlalchemy import not_
 
 router = APIRouter()
+
+
+@router.get("/students")
+def get_students(db: Session = Depends(get_db), current_user: Users = Depends(get_current_user)):
+    """
+    Get all users who do not have any permissions (students).
+    Requires admin or admission official permission.
+    """
+    if not current_user or not is_admin_or_admission_official(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or admission official permission required",
+        )
+
+    students = db.query(Users).filter(not_(Users.permissions.any())).all()
+    return students
+
+
+@router.get("/staffs")
+def get_staffs(db: Session = Depends(get_db), current_user: Users = Depends(get_current_user)):
+    """
+    Get all users who have at least one permission (staff), except own user.
+    Requires admin permission.
+    """
+    if not current_user or not has_permission(current_user, "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin permission required",
+        )
+
+    staffs = db.query(Users).filter(Users.permissions.any(), Users.user_id != current_user.user_id).all()
+    return staffs
 
 
 @router.post("/permissions/grant")
