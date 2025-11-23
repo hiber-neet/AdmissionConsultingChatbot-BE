@@ -102,7 +102,7 @@ class CustomerProfile(Base):
     
     customer_id = Column(Integer, ForeignKey("Users.user_id"), primary_key=True)
     interest_id = Column(Integer, ForeignKey('Interest.interest_id'), nullable=True)
-    status = Column(Boolean)
+    status = Column(Boolean , default=True)
     # Relationships
     user = relationship('Users', back_populates='customer_profile')
     interest = relationship('Interest', back_populates='customer_profiles')
