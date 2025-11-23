@@ -200,6 +200,52 @@ def revoke_permission(
     return {"removed": removed, "skipped": skipped}
 
 
+@router.put("/permissions/update")
+def update_permissions(
+    payload: PermissionChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user)
+):
+    """
+    Update/replace all permissions for a user (admin only).
+    Admins cannot modify the permissions of other admins.
+    """
+    if not current_user or not has_permission(current_user, "admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin permission required")
+
+    target = db.query(Users).filter(Users.user_id == payload.user_id).first()
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
+
+    # Prevent admin from modifying another admin's permissions
+    from app.models.entities import Permission as PermissionModel
+    target_is_admin = any(p.permission_name and "admin" in p.permission_name.lower() for p in target.permissions or [])
+    if target_is_admin and target.user_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify permissions of another admin")
+
+    # Clear existing permissions
+    db.query(UserPermission).filter(UserPermission.user_id == target.user_id).delete()
+
+    # Validate and add new permissions
+    requested_ids = list(dict.fromkeys(payload.permission_ids or []))
+    if requested_ids:
+        perms = db.query(PermissionModel).filter(PermissionModel.permission_id.in_(requested_ids)).all()
+        found_ids = {p.permission_id for p in perms}
+        missing = [pid for pid in requested_ids if pid not in found_ids]
+        if missing:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"missing_permission_ids": missing})
+
+        for perm in perms:
+            db.add(UserPermission(user_id=target.user_id, permission_id=perm.permission_id))
+
+    db.commit()
+    db.refresh(target)
+
+    # Return the updated user permissions
+    updated_permission_ids = [p.permission_id for p in target.permissions]
+    return {"user_id": target.user_id, "permission_ids": updated_permission_ids}
+
+
 @router.post("/ban")
 def ban_user(
     payload: BanUserRequest,
