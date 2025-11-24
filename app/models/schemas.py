@@ -3,6 +3,36 @@ from typing import Optional, List
 from datetime import date
 
 
+# ================= AUTH =================
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+
+class TokenData(BaseModel):
+    email: Optional[str] = None
+    user_id: Optional[int] = None
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserProfileResponse(BaseModel):
+    user_id: int
+    full_name: str 
+    email: str
+    role_name: Optional[str]
+    student_profile: Optional[dict] = None
+    consultant_profile: Optional[dict] = None
+    content_manager_profile: Optional[dict] = None
+    admission_official_profile: Optional[dict] = None
+
+    class Config:
+        orm_mode = True
+
+
 # ================= ROLE =================
 class RoleBase(BaseModel):
     role_name: str
@@ -23,24 +53,47 @@ class RoleResponse(RoleBase):
 class UserBase(BaseModel):
     full_name: str
     email: EmailStr
-    status: Optional[str] = None
+    status: Optional[bool] = None
 
 
 class UserCreate(UserBase):
     password: str
     role_id: Optional[int] = None
+    permissions: Optional[List[int]] = None  # List of permission IDs
+    phone_number: Optional[str] = None
+    # Optional flags to set when creating profiles for certain permissions
+    consultant_is_leader: Optional[bool] = False
+    content_manager_is_leader: Optional[bool] = False
+    # Optional interest information to create CustomerProfile at registration
+    interest_desired_major: Optional[str] = None
+    interest_region: Optional[str] = None
+
+
+class PermissionChangeRequest(BaseModel):
+    user_id: int
+    permission_ids: List[int]
+    consultant_is_leader: Optional[bool] = False
+    content_manager_is_leader: Optional[bool] = False
+
+
+class PermissionRevokeRequest(BaseModel):
+    user_id: int
+    permission_ids: List[int]
+class BanUserRequest(BaseModel):
+    user_id: int
 
 
 class UserUpdate(BaseModel):
     full_name: Optional[str]
     email: Optional[EmailStr]
     password: Optional[str]
-    status: Optional[str]
+    status: Optional[bool]
 
 
 class UserResponse(UserBase):
     user_id: int
     role_id: Optional[int]
+    permissions: Optional[List[int]] = []  # List of permission IDs
 
     class Config:
         orm_mode = True
@@ -74,6 +127,24 @@ class InterestCreate(InterestBase):
 
 class InterestResponse(InterestBase):
     interest_id: int
+
+    class Config:
+        orm_mode = True
+
+
+# ================= ACADEMIC SCORE =================
+class AcademicScoreBase(BaseModel):
+    subject_name: str
+    score: float
+
+
+class AcademicScoreCreate(AcademicScoreBase):
+    pass
+
+
+class AcademicScoreResponse(AcademicScoreBase):
+    score_id: int
+    customer_id: int
 
     class Config:
         orm_mode = True
@@ -136,14 +207,50 @@ class CourseResponse(CourseBase):
 
 
 class MajorBase(BaseModel):
-    name: str
-    description: Optional[str]
-    curriculum_id: Optional[int]
-
+    major_name: str
 
 class MajorResponse(MajorBase):
     major_id: int
-    courses: Optional[List[CourseResponse]] = []
+
+    class Config:
+        orm_mode = True
+
+
+class SpecializationBase(BaseModel):
+    specialization_id: int
+    specialization_name: str
+
+    class Config:
+        orm_mode = True
+
+
+class ArticleBase(BaseModel):
+    article_id: int
+    title: str
+    description: Optional[str]
+    url: Optional[str]
+    create_at: Optional[date]
+    specialization: Optional[SpecializationBase]
+
+    class Config:
+        orm_mode = True
+
+
+class AdmissionFormBase(BaseModel):
+    form_id: int
+    fullname: str
+    email: str
+    phone_number: Optional[str]
+    campus: Optional[str]
+    submit_time: Optional[date]
+
+    class Config:
+        orm_mode = True
+
+
+class MajorDetailResponse(MajorResponse):
+    articles: List[ArticleBase] = []
+    admission_forms: List[AdmissionFormBase] = []
 
     class Config:
         orm_mode = True
@@ -269,31 +376,50 @@ class ChatSessionResponse(ChatSessionBase):
         orm_mode = True
 
 
-# ================= ARTICLE =================
-class ArticleCategoryBase(BaseModel):
-    category_name: str
-
-
-class ArticleCategoryResponse(ArticleCategoryBase):
-    category_id: int
+# ================= SPECIALIZATION =================
+class SpecializationResponse(BaseModel):
+    specialization_id: int
+    specialization_name: str
+    major_id: Optional[int]
+    articles: List['ArticleResponse'] = []
 
     class Config:
         orm_mode = True
 
+# ================= ARTICLE =================
 
-class ArticleBase(BaseModel):
+
+class ArticleCreate(BaseModel):
     title: str
-    content: str
-    status: Optional[bool]
-    author: str
-    view_count: Optional[int]
-    date_created: Optional[date]
-    tag: Optional[str]
-    category_id: Optional[int]
+    description: str
+    url: Optional[str] = None
+    major_id: Optional[int] = None
+    specialization_id: Optional[int] = None
 
+class ArticleUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    content: Optional[str] = None
+    url: Optional[str] = None
+    major_id: Optional[int] = None
+    specialization_id: Optional[int] = None
 
-class ArticleResponse(ArticleBase):
+class ArticleStatusUpdate(BaseModel):
+    status: str  # "draft", "published", or "cancelled"
+
+class ArticleResponse(BaseModel):
     article_id: int
+    title: str
+    description: str
+    url: Optional[str]
+    status: str
+    create_at: date
+    created_by: int
+    major_id: Optional[int] = None
+    specialization_id: Optional[int] = None
+    author_name: Optional[str] = None
+    major_name: Optional[str] = None
+    specialization_name: Optional[str] = None
 
     class Config:
         orm_mode = True
@@ -310,6 +436,27 @@ class PersonalizedRecommendationBase(BaseModel):
 
 class PersonalizedRecommendationResponse(PersonalizedRecommendationBase):
     recommendation_id: int
+
+    class Config:
+        orm_mode = True
+
+
+# ================= RIASEC =================
+class RiasecResultBase(BaseModel):
+    score_realistic: int
+    score_investigative: int
+    score_artistic: int
+    score_social: int
+    score_enterprising: int
+    score_conventional: int
+    result: str
+
+class RiasecResultCreate(RiasecResultBase):
+    pass
+
+class RiasecResult(RiasecResultBase):
+    result_id: int
+    customer_id: int
 
     class Config:
         orm_mode = True

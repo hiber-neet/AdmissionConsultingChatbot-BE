@@ -19,6 +19,7 @@ class Users(Base):
     password = Column(String, nullable=False)
     status = Column(Boolean, default=True)
     role_id = Column(Integer, ForeignKey('Role.role_id'), nullable=True)
+    phone_number = Column(String, nullable=False)
 
     # Relationships
     role = relationship('Role', back_populates='users')
@@ -102,7 +103,7 @@ class CustomerProfile(Base):
     
     customer_id = Column(Integer, ForeignKey("Users.user_id"), primary_key=True)
     interest_id = Column(Integer, ForeignKey('Interest.interest_id'), nullable=True)
-    status = Column(Boolean)
+    status = Column(Boolean , default=True)
     # Relationships
     user = relationship('Users', back_populates='customer_profile')
     interest = relationship('Interest', back_populates='customer_profiles')
@@ -232,7 +233,7 @@ class Major(Base):
     __tablename__ = 'Major'
     
     major_id = Column(Integer, primary_key=True, autoincrement=True)
-    major_name = Column(String, nullable=False)
+    major_name = Column("name",String, nullable=False)
     created_by = Column(Integer, ForeignKey('Users.user_id'), nullable=True)
     
     admission_forms = relationship('AdmissionForm', back_populates='major', cascade="all, delete-orphan")
@@ -462,6 +463,8 @@ class Article(Base):
     title = Column(String)
     description = Column(String)
     url = Column(String)
+    # content = Column(Text)
+    status = Column(String, default="draft")  # Values: draft, published, cancelled
     create_at = Column(Date, default=datetime.now)
     created_by = Column(Integer, ForeignKey("Users.user_id"))
     major_id = Column(Integer, ForeignKey('Major.major_id'), nullable=True)
