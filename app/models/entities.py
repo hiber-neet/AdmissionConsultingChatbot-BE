@@ -109,7 +109,18 @@ class CustomerProfile(Base):
     academic_scores = relationship('AcademicScore', back_populates='customer', cascade="all, delete-orphan")
     riasec_results = relationship('RiasecResult', back_populates='customer', cascade="all, delete-orphan")
    
-
+class LiveChatQueue(Base):
+    __tablename__ = 'LiveChatQueue'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    customer_id = Column(Integer, ForeignKey("CustomerProfile.customer_id"))
+    admission_official_id = Column(Integer, ForeignKey("AdmissionOfficialProfile.admission_official_id"), nullable=True)
+    status = Column(String, default="waiting")  # waiting, accepted, canceled
+    created_at = Column(Date, default=datetime.now)
+    
+    # relationships
+    customer = relationship("Users", foreign_keys=[customer_id])
+    admission_official = relationship("Users", foreign_keys=[admission_official_id])
 
 class Interest(Base):
     __tablename__ = 'Interest'
