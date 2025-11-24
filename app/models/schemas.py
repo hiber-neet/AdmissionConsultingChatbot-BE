@@ -60,6 +60,7 @@ class UserCreate(UserBase):
     password: str
     role_id: Optional[int] = None
     permissions: Optional[List[int]] = None  # List of permission IDs
+    phone_number: Optional[str] = None
     # Optional flags to set when creating profiles for certain permissions
     consultant_is_leader: Optional[bool] = False
     content_manager_is_leader: Optional[bool] = False

@@ -19,6 +19,7 @@ class Users(Base):
     password = Column(String, nullable=False)
     status = Column(Boolean, default=True)
     role_id = Column(Integer, ForeignKey('Role.role_id'), nullable=True)
+    phone_number = Column(String, nullable=False)
 
     # Relationships
     role = relationship('Role', back_populates='users')

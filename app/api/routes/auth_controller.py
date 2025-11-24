@@ -35,12 +35,12 @@ def register(*, db: Session = Depends(get_db), user_in: UserCreate) -> Any:
             detail="The user with this email already exists in the system.",
         )
     
-    # Create user with basic information
+    # Create user with basic information; role_id is deferred
     user = Users(
         email=user_in.email,
         full_name=user_in.full_name,
+        phone_number=user_in.phone_number,
         password=get_password_hash(user_in.password),
-        role_id=user_in.role_id,
         status=True,
     )
     db.add(user)
@@ -52,33 +52,34 @@ def register(*, db: Session = Depends(get_db), user_in: UserCreate) -> Any:
     if user_in.permissions:
         # Import models here to avoid circular import at module load
         from app.models.entities import Permission as PermissionModel
+        from app.models.entities import Role as RoleModel
         from app.models.entities import ConsultantProfile as ConsultantProfileModel
         from app.models.entities import ContentManagerProfile as ContentManagerProfileModel
         from app.models.entities import AdmissionOfficialProfile as AdmissionOfficialProfileModel
 
-        # Track permission names present for creating related profiles
-        permission_names = set()
+        # Validate permissions and get their names
+        perms = db.query(PermissionModel).filter(PermissionModel.permission_id.in_(user_in.permissions)).all()
+        if len(perms) != len(set(user_in.permissions)):
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more permission IDs are invalid.")
 
-        for permission_id in user_in.permissions:
-            perm = db.query(PermissionModel).filter(
-                PermissionModel.permission_id == permission_id
-            ).first()
-            if not perm:
-                # Invalid permission id — rollback and return informative error
-                db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Permission with id {permission_id} not found",
-                )
+        permission_names = { (p.permission_name or "").lower() for p in perms }
 
-            permission_names.add((perm.permission_name or "").strip().lower())
+        # Assign permissions to user
+        for perm in perms:
+            db.add(UserPermission(user_id=user.user_id, permission_id=perm.permission_id))
 
-            user_permission = UserPermission(
-                user_id=user.user_id,
-                permission_id=permission_id
-            )
-            db.add(user_permission)
-
+        # Determine and set the user's role based on permissions
+        if any("admission" in name for name in permission_names):
+            admission_role = db.query(RoleModel).filter(RoleModel.role_name.ilike("%admission%")).first()
+            if admission_role:
+                user.role_id = admission_role.role_id
+            else:
+                user.role_id = None  # Or handle missing "Admission" role error
+        else:
+            # If permissions are given but none are admission, role is explicitly null
+            user.role_id = None
+        
         # Create related profiles based on granted permissions
         # Consultant profile
         if any(name for name in permission_names if "consultant" in name):
@@ -109,6 +110,8 @@ def register(*, db: Session = Depends(get_db), user_in: UserCreate) -> Any:
             )
             db.add(admission_profile)
     else:
+        # No permissions provided, so assign the role_id from the original request
+        user.role_id = user_in.role_id
         # No permissions provided => create CustomerProfile for this user
         # Optionally create an Interest record if interest data was provided during registration
         from app.models.entities import CustomerProfile as CustomerProfileModel
@@ -138,6 +141,7 @@ def register(*, db: Session = Depends(get_db), user_in: UserCreate) -> Any:
         "user_id": user.user_id,
         "email": user.email,
         "full_name": user.full_name,
+        "phone_number": user.phone_number,
         "status": user.status,
         "role_id": user.role_id,
         "permissions": [p.permission_id for p in user.permissions] if user.permissions else []
