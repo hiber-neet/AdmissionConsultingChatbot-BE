@@ -218,7 +218,7 @@ def update_permissions(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
 
     # Prevent admin from modifying another admin's permissions
-    from app.models.entities import Permission as PermissionModel
+    from app.models.entities import Permission as PermissionModel, Role as RoleModel
     target_is_admin = any(p.permission_name and "admin" in p.permission_name.lower() for p in target.permissions or [])
     if target_is_admin and target.user_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify permissions of another admin")
@@ -237,6 +237,20 @@ def update_permissions(
 
         for perm in perms:
             db.add(UserPermission(user_id=target.user_id, permission_id=perm.permission_id))
+
+    # Check for "Admission" permission by name and update role
+    has_admission_perm = any("admission" in p.permission_name.lower() for p in perms if p.permission_name)
+    
+    if has_admission_perm:
+        # Find a role that contains "Admission" in its name, case-insensitive
+        admission_role = db.query(RoleModel).filter(RoleModel.role_name.ilike("%admission%")).first()
+        if admission_role:
+            target.role = admission_role
+        else:
+            # This case might happen if the "Admission" role is missing in the DB
+            target.role = None
+    else:
+        target.role = None
 
     db.commit()
     db.refresh(target)
