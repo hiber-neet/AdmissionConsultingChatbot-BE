@@ -23,6 +23,8 @@ class UserProfileResponse(BaseModel):
     user_id: int
     full_name: str 
     email: str
+    phone_number: Optional[str]
+    permission: Optional[List[str]]
     role_name: Optional[str]
     student_profile: Optional[dict] = None
     consultant_profile: Optional[dict] = None
