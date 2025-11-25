@@ -114,8 +114,8 @@ class LiveChatQueue(Base):
     __tablename__ = 'LiveChatQueue'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    customer_id = Column(Integer, ForeignKey("CustomerProfile.customer_id"))
-    admission_official_id = Column(Integer, ForeignKey("AdmissionOfficialProfile.admission_official_id"), nullable=True)
+    customer_id = Column(Integer, ForeignKey("Users.user_id"))
+    admission_official_id = Column(Integer, ForeignKey("Users.user_id"), nullable=True)
     status = Column(String, default="waiting")  # waiting, accepted, canceled
     created_at = Column(Date, default=datetime.now)
     
