@@ -186,6 +186,7 @@ class RiasecResult(Base):
     score_enterprising = Column(Integer)
     score_conventional = Column(Integer)
     result = Column(String)
+    session_id = Column(String, unique=True)
     customer_id = Column(Integer, ForeignKey('CustomerProfile.customer_id'))
     
     # Relationships
