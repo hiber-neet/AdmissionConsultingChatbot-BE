@@ -452,13 +452,14 @@ class RiasecResultBase(BaseModel):
     score_enterprising: int
     score_conventional: int
     result: str
+    session_id: str
 
 class RiasecResultCreate(RiasecResultBase):
     pass
 
 class RiasecResult(RiasecResultBase):
     result_id: int
-    customer_id: int
+    customer_id: Optional[int] = None
 
     class Config:
         orm_mode = True
