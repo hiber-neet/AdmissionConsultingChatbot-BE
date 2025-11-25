@@ -32,6 +32,8 @@ async def get_user_profile(
         "user_id": user.user_id,
         "full_name": user.full_name,
         "email": user.email,
+        "phone_number": user.phone_number,
+        "permission": [permission.permission_name for permission in user.permissions] if user.permissions else None,
         "role_name": user.role.role_name if user.role else None,
         "student_profile": None,
         "consultant_profile": None,
