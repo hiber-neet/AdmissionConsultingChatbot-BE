@@ -463,3 +463,47 @@ class RiasecResult(RiasecResultBase):
 
     class Config:
         orm_mode = True
+
+# ================= TEMPLATE =================
+class TemplateFieldBase(BaseModel):
+    field_name: str
+    order_field: int
+    field_type: str
+
+class TemplateFieldCreate(TemplateFieldBase):
+    pass
+
+class TemplateFieldUpdate(BaseModel):
+    field_name: Optional[str] = None
+    order_field: Optional[int] = None
+    field_type: Optional[str] = None
+
+class TemplateFieldResponse(TemplateFieldBase):
+    template_field_id: int
+    template_id: int
+
+    class Config:
+        orm_mode = True
+
+
+class TemplateBase(BaseModel):
+    template_name: str
+
+class TemplateCreate(TemplateBase):
+    template_fields: List[TemplateFieldCreate]
+
+class TemplateUpdate(BaseModel):
+    template_name: Optional[str] = None
+    template_fields: Optional[List[TemplateFieldUpdate]] = None
+class TemplateDelete(BaseModel):
+    template_ids: List[int]
+
+
+class TemplateResponse(TemplateBase):
+    template_id: int
+    is_active: bool
+    created_by: Optional[int] = None
+    template_fields: List[TemplateFieldResponse] = []
+
+    class Config:
+        orm_mode = True
