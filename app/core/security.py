@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from app.models.schemas import TokenData
 from app.models.database import get_db
 from app.models.entities import Users
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 # Load environment variables
 load_dotenv()
@@ -191,19 +191,41 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)) -> O
     Returns None if no token is provided or token is invalid.
     """    
     auth_header = request.headers.get("Authorization")
+    print(f"DEBUG: Auth header received: {auth_header}")
+    
     if not auth_header or "Bearer" not in auth_header:
+        print("DEBUG: No Authorization header or Bearer not found")
         return None
         
     try:
         token = auth_header.split(" ")[1]
+        print(f"DEBUG: Token extracted: {token[:20]}...")
+        
         token_data = verify_token(token)
         if token_data.email is None:
+            print("DEBUG: Token verification failed - no email")
             return None
             
+        print(f"DEBUG: Token verified for email: {token_data.email}")
+            
+        # Load user with permissions relationship using explicit join
+        from app.models.entities import Permission
         user = db.query(Users).filter(Users.email == token_data.email).first()
+        print(f"DEBUG: Found user: {user.email if user else 'None'}")
+        
+        if user:
+            # Manually load permissions
+            permissions = db.query(Permission).join(Users.permissions).filter(Users.user_id == user.user_id).all()
+            user.permissions = permissions
+            print(f"DEBUG: Loaded {len(permissions)} permissions for user {user.user_id}")
+            for perm in permissions:
+                print(f"DEBUG: Permission: {perm.permission_name}")
+        
         if user is None or not user.status:
+            print("DEBUG: User not found or inactive")
             return None
             
         return user
-    except (JWTError, Exception):
+    except (JWTError, Exception) as e:
+        print(f"DEBUG: Exception in get_current_user: {e}")
         return None
