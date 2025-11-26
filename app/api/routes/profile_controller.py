@@ -16,57 +16,112 @@ async def get_user_profile(
     """
     Get user profile information. Users can only access their own profile.
     """
-    # Check if user has permission to access this profile
-    verify_user_access(current_user.user_id, user_id)
+    try:
+        print(f"Starting profile fetch for user_id: {user_id}")
+        print(f"Current user: {current_user.user_id if current_user else 'None'}")
+        
+        # Check if user has permission to access this profile
+        verify_user_access(current_user.user_id, user_id)
+        print("Access verification passed")
 
-    # Get user with role information (using outer join to support null role_id)
-    user = db.query(Users).outerjoin(Role).filter(Users.user_id == user_id).first()
-    if not user:
+        # Get user with role information (using outer join to support null role_id)
+        user = db.query(Users).outerjoin(Role).filter(Users.user_id == user_id).first()
+        print(f"User query result: {user}")
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        print(f"User found: {user.full_name}, email: {user.email}")
+        
+        # Build basic profile response
+        profile_data = {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "permission": [],
+            "role_name": None,
+            "student_profile": None,
+            "consultant_profile": None,
+            "content_manager_profile": None,
+            "admission_official_profile": None
+        }
+        
+        print("Basic profile data created")
+        
+        # Safely get permissions
+        try:
+            if user.permissions:
+                profile_data["permission"] = [permission.permission_name for permission in user.permissions if permission.permission_name]
+                print(f"Permissions added: {profile_data['permission']}")
+        except Exception as e:
+            print(f"Error getting permissions: {e}")
+            profile_data["permission"] = []
+            
+        # Safely get role
+        try:
+            if user.role:
+                profile_data["role_name"] = user.role.role_name
+                print(f"Role added: {profile_data['role_name']}")
+        except Exception as e:
+            print(f"Error getting role: {e}")
+            profile_data["role_name"] = None
+
+        # Safely get profiles - simplified for debugging
+        try:
+            if hasattr(user, 'customer_profile') and user.customer_profile:
+                profile_data["student_profile"] = {"status": "exists"}
+                print("Student profile exists")
+        except Exception as e:
+            print(f"Error with student profile: {e}")
+            
+        try:
+            if hasattr(user, 'consultant_profile') and user.consultant_profile:
+                profile_data["consultant_profile"] = {
+                    "status": user.consultant_profile.status,
+                    "is_leader": user.consultant_profile.is_leader
+                }
+                print("Consultant profile exists")
+        except Exception as e:
+            print(f"Error with consultant profile: {e}")
+            
+        try:
+            if hasattr(user, 'content_manager_profile') and user.content_manager_profile:
+                profile_data["content_manager_profile"] = {
+                    "is_leader": user.content_manager_profile.is_leader
+                }
+                print("Content manager profile exists")
+        except Exception as e:
+            print(f"Error with content manager profile: {e}")
+            
+        try:
+            if hasattr(user, 'admission_official_profile') and user.admission_official_profile:
+                profile_data["admission_official_profile"] = {
+                    "rating": user.admission_official_profile.rating,
+                    "current_sessions": user.admission_official_profile.current_sessions,
+                    "max_sessions": user.admission_official_profile.max_sessions,
+                    "status": user.admission_official_profile.status
+                }
+                print("Admission official profile exists")
+        except Exception as e:
+            print(f"Error with admission official profile: {e}")
+
+        print(f"Final profile data: {profile_data}")
+        return profile_data
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 403, 404)
+        raise
+    except Exception as e:
+        # Log the actual error for debugging
+        print(f"CRITICAL ERROR in get_user_profile: {str(e)}")
+        print(f"Error type: {type(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error while fetching profile: {str(e)}"
         )
-
-    # Build profile response based on user's role
-    profile_data = {
-        "user_id": user.user_id,
-        "full_name": user.full_name,
-        "email": user.email,
-        "phone_number": user.phone_number,
-        "permission": [permission.permission_name for permission in user.permissions] if user.permissions else None,
-        "role_name": user.role.role_name if user.role else None,
-        "student_profile": None,
-        "consultant_profile": None,
-        "content_manager_profile": None,
-        "admission_official_profile": None
-    }
-
-    # Add role-specific profile data if exists
-    if user.customer_profile:
-        profile_data["student_profile"] = {
-            "interest": {
-                "desired_major": user.customer_profile.interest.desired_major if user.customer_profile.interest else None,
-                "region": user.customer_profile.interest.region if user.customer_profile.interest else None
-            } if user.customer_profile.interest else None
-        }
-    
-    if user.consultant_profile:
-        profile_data["consultant_profile"] = {
-            "status": user.consultant_profile.status,
-            "is_leader": user.consultant_profile.is_leader
-        }
-
-    if user.content_manager_profile:
-        profile_data["content_manager_profile"] = {
-            "is_leader": user.content_manager_profile.is_leader
-        }
-
-    if user.admission_official_profile:
-        profile_data["admission_official_profile"] = {
-            "rating": user.admission_official_profile.rating,
-            "current_sessions": user.admission_official_profile.current_sessions,
-            "max_sessions": user.admission_official_profile.max_sessions,
-            "status": user.admission_official_profile.status
-        }
-
-    return profile_data
