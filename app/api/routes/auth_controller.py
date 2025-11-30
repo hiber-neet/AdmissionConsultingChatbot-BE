@@ -48,11 +48,13 @@ def register(*, db: Session = Depends(get_db), user_in: UserCreate) -> Any:
     # (Without flush/commit, user.user_id will be None for an autoincrement PK.)
     db.flush()
 
+    # Import models that we'll need in both branches
+    from app.models.entities import Role as RoleModel
+    
     # Add permissions if provided (validate permission ids first)
     if user_in.permissions:
         # Import models here to avoid circular import at module load
         from app.models.entities import Permission as PermissionModel
-        from app.models.entities import Role as RoleModel
         from app.models.entities import ConsultantProfile as ConsultantProfileModel
         from app.models.entities import ContentManagerProfile as ContentManagerProfileModel
         from app.models.entities import AdmissionOfficialProfile as AdmissionOfficialProfileModel
@@ -110,9 +112,18 @@ def register(*, db: Session = Depends(get_db), user_in: UserCreate) -> Any:
             )
             db.add(admission_profile)
     else:
-        # No permissions provided, so assign the role_id from the original request
-        user.role_id = user_in.role_id
-        # No permissions provided => create CustomerProfile for this user
+        # No permissions provided => regular customer user
+        # Find or create a "Customer" role
+        customer_role = db.query(RoleModel).filter(RoleModel.role_name.ilike("customer")).first()
+        if not customer_role:
+            # Create Customer role if it doesn't exist
+            customer_role = RoleModel(role_name="Customer")
+            db.add(customer_role)
+            db.flush()  # Get the role_id
+        
+        user.role_id = customer_role.role_id
+        
+        # Create CustomerProfile for this user
         # Optionally create an Interest record if interest data was provided during registration
         from app.models.entities import CustomerProfile as CustomerProfileModel
         from app.models.entities import Interest as InterestModel
