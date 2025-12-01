@@ -2,5 +2,12 @@ node_modules
 .env
 .venv/
 
-# Session change documentation (local development notes)
-SESSION_CHANGES_*.md
+# Local development documentation (exclude from repository)
+LOCAL_NOTES/
+SESSION_CHANGES/
+
+# Test data scripts
+create_test_data.py
+test_analytics.py
+test_enhanced_gaps.py
+test_category_api.py

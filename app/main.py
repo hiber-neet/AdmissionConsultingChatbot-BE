@@ -20,7 +20,8 @@ from app.api.routes import (
     academic_score_controller,
     live_chat_controller,
     intent_controller,
-    template_controller
+    template_controller,
+    analytics_controller
 )
 from app.models.database import init_db
 import os
@@ -130,6 +131,7 @@ app.include_router(permissions_controller.router, prefix="/permissions", tags=["
 app.include_router(academic_score_controller.router, prefix="/academic-score", tags=["Academic Score"])
 app.include_router(intent_controller.router, prefix="/intent", tags=["Intent"])
 app.include_router(template_controller.router, prefix="/template", tags=["Template"])
+app.include_router(analytics_controller.router, prefix="/analytics", tags=["Analytics"])
 
 @app.get("/")
 async def root():
