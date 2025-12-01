@@ -10,7 +10,7 @@ python-dotenv==1.0.0          # Environment variables
 sse-starlette==2.1.0
 
 pydantic            # Schema validation
-pydantic-settings==2.1.0      # Settings management
+pydantic-settings==2.10.1      # Settings management
 python-multipart==0.0.6       # File upload handling
 pydantic[email]
 
