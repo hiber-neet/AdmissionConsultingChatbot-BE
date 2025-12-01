@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException
@@ -24,10 +24,57 @@ from app.api.routes import (
 )
 from app.models.database import init_db
 import os
+
+# OAuth2 scheme for Swagger UI
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    version=settings.VERSION
+    version=settings.VERSION,
+    # Add security scheme for Swagger docs
+    openapi_tags=[
+        {"name": "Authentication", "description": "Authentication operations"},
+        {"name": "Users", "description": "User management operations"},
+        {"name": "Intent", "description": "Intent management operations"},
+        {"name": "Knowledge Base", "description": "Knowledge base operations"},
+        {"name": "Training Questions", "description": "Training Q&A operations"},
+    ]
 )
+
+# Add security scheme to OpenAPI
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    from fastapi.openapi.utils import get_openapi
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description="Admission Consulting Chatbot API with JWT Authentication",
+        routes=app.routes,
+    )
+    
+    # Add security scheme
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Enter JWT token obtained from /auth/login"
+        }
+    }
+    
+    # Add security requirement to all endpoints (except auth)
+    for path, path_item in openapi_schema["paths"].items():
+        if not path.startswith("/auth"):
+            for operation in path_item.values():
+                if isinstance(operation, dict) and "operationId" in operation:
+                    operation["security"] = [{"BearerAuth": []}]
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 app.add_middleware(
     CORSMiddleware,

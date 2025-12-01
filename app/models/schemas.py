@@ -317,10 +317,10 @@ class FaqStatisticsResponse(FaqStatisticsBase):
 # ================= KNOWLEDGE BASE =================
 class KnowledgeBaseDocumentBase(BaseModel):
     title: str
-    content: str
+    file_path: str
     category: Optional[str]
     created_at: Optional[date]
-    update_at: Optional[date]
+    updated_at: Optional[date]
     created_by: Optional[int]
 
 
