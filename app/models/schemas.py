@@ -407,7 +407,8 @@ class ArticleUpdate(BaseModel):
     specialization_id: Optional[int] = None
 
 class ArticleStatusUpdate(BaseModel):
-    status: str  # "draft", "published", or "cancelled"
+    status: str  # "draft", "published", "rejected" or "cancelled"
+    note: Optional[str] = None
 
 class ArticleResponse(BaseModel):
     article_id: int
@@ -422,6 +423,7 @@ class ArticleResponse(BaseModel):
     author_name: Optional[str] = None
     major_name: Optional[str] = None
     specialization_name: Optional[str] = None
+    note: Optional[str] = None
 
     class Config:
         orm_mode = True
