@@ -1,3 +1,6 @@
 node_modules
 .env
 .venv/
+
+# Session change documentation (local development notes)
+SESSION_CHANGES_*.md
