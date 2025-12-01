@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, List
+from typing import Any, Dict, List
 from langchain_google_genai import GoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_text_splitters  import RecursiveCharacterTextSplitter
 from langchain_classic.memory import ConversationBufferMemory
@@ -9,7 +9,7 @@ import os
 import uuid
 import asyncio
 from sqlalchemy.orm import Session
-from app.models.entities import ChatInteraction, ChatSession, ParticipateChatSession, TrainingQuestionAnswer
+from app.models.entities import AcademicScore, ChatInteraction, ChatSession, Major, ParticipateChatSession, RiasecResult, TrainingQuestionAnswer
 from app.models.database import SessionLocal
 from sqlalchemy.exc import SQLAlchemyError
 from app.services.memory_service import MemoryManager
