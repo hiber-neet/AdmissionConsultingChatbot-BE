@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, APIRouter
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, APIRouter, Form
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
@@ -11,6 +11,9 @@ from app.core.security import get_current_user, has_permission
 from pathlib import Path
 from sqlalchemy.orm import Session
 import os
+import json
+import uuid
+from datetime import datetime
 
 router = APIRouter()
 
@@ -38,6 +41,9 @@ def check_view_permission(current_user: entities.Users = Depends(get_current_use
 async def upload_document(
     intend_id: int,
     file: UploadFile = File(...),
+    title: str = Form(None),
+    category: str = Form(None),
+    current_user_id: int = Form(1),
     db: Session = Depends(get_db)
 ):
     # STEP 1: VALIDATE FILE
@@ -83,74 +89,92 @@ async def upload_document(
     except Exception as e:
         raise HTTPException(status_code=422, detail=f"Document processing failed: {str(e)}")
     
-    # STEP 4: SAVE TO DATABASE
-    # try:
-    #     document = KnowledgeBaseDocument(
-    #         title=title,
-    #         content=content_text,
-    #         document_type=file.content_type,
-    #         file_path=f"/uploads/{file.filename}",
-    #         created_by=current_user.id,
-    #         metadata=json.dumps({
-    #             "original_filename": file.filename,
-    #             "file_extension": Path(file.filename).suffix.lower(),
-    #             "upload_size_bytes": len(file_content),
-    #             "extracted_size_bytes": len(content_text)
-    #         })
-    #     )
-    #     db.add(document)
-    #     db.commit()
-    #     db.refresh(document)
-    
-    # except Exception as e:
-    #     db.rollback()
-    #     raise HTTPException(status_code=500, detail=f"Failed to save document: {str(e)}")
-    
-    # STEP 5: CHUNK + EMBED + STORE IN QDRANT
+    # STEP 4: SAVE FILE TO DISK
     try:
-        print(type(content_text), content_text)
+        # Create uploads directory if it doesn't exist
+        upload_dir = Path("uploads")
+        upload_dir.mkdir(exist_ok=True)
+        
+        # Generate unique filename to avoid conflicts
+        unique_filename = f"{uuid.uuid4()}_{file.filename}"
+        file_path = upload_dir / unique_filename
+        
+        # Save file to disk
+        with open(file_path, "wb") as f:
+            f.write(file_content)
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+    # STEP 5: SAVE TO DATABASE
+    try:
+        document = entities.KnowledgeBaseDocument(
+            title=title or file.filename,
+            file_path=str(file_path),
+            category=category or "general",
+            created_by=current_user_id
+        )
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+    
+    except Exception as e:
+        db.rollback()
+        # Clean up file if database save fails
+        if file_path.exists():
+            file_path.unlink()
+        raise HTTPException(status_code=500, detail=f"Failed to save document to database: {str(e)}")
+
+    # STEP 6: CHUNK + EMBED + STORE IN QDRANT
+    # STEP 6: CHUNK + EMBED + STORE IN QDRANT
+    try:
         service = TrainingService()
         chunk_ids = service.add_document(
-            1,
+            current_user_id,
             content_text,
             intend_id,
             {
                 
                 "type": file.content_type,
-                "filename": file.filename
+                "filename": file.filename,
+                "document_id": document.document_id
             }
         )
     
     except Exception as e:
         # Cleanup if chunking fails
-        # db.delete(document)
-        # db.commit()
+        db.delete(document)
+        db.commit()
+        if file_path.exists():
+            file_path.unlink()
         raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
-    
-    # STEP 6: SAVE CHUNK REFERENCES
-    # try:
-    #     for i, chunk_id in enumerate(chunk_ids):
-    #         chunk = DocumentChunk(
-    #             document_id=document.id,
-    #             chunk_index=i,
-    #             embedding_id=chunk_id
-    #         )
-    #         db.add(chunk)
+
+    # STEP 7: SAVE CHUNK REFERENCES (if needed)
+    try:
+        for i, chunk_id in enumerate(chunk_ids):
+            chunk = entities.DocumentChunk(
+                document_id=document.document_id,
+                chunk_text=f"Chunk {i+1}",  # You might want to store actual chunk text
+                embedding_vector=str(chunk_id)  # Store the Qdrant vector ID
+            )
+            db.add(chunk)
         
-    #     db.commit()
+        db.commit()
     
-    # except Exception as e:
-    #     db.rollback()
-    #     raise HTTPException(status_code=500, detail=f"Failed to save chunks: {str(e)}")
-    
+    except Exception as e:
+        db.rollback()
+        # Note: We don't delete the document here as it's already useful
+        print(f"Warning: Failed to save chunk references: {str(e)}")
+
     # SUCCESS
     return {
         "message": "Document uploaded and indexed successfully",
-        "document_id": 1,
+        "document_id": document.document_id,
         "filename": file.filename,
+        "title": document.title,
         "file_type": Path(file.filename).suffix.lower(),
         "chunks_created": len(chunk_ids),
-        "original_size_kb": len(file_content) / 1024,
+        "original_size_kb": round(len(file_content) / 1024, 2),
         "extracted_text_length": len(content_text)
     }
 
