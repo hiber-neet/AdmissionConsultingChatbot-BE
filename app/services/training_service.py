@@ -298,44 +298,77 @@ class TrainingService:
         finally:
             db.close()
     async def stream_response_from_qa(self, query: str, context: str, session_id: int = 1, user_id: int = 1):
-      
-        memory = memory_service.get_memory(session_id)
-        mem_vars = memory.load_memory_variables({})
-        chat_history = mem_vars.get("chat_history", "")
-        prompt = f"""
-        Bạn là chatbot tư vấn tuyển sinh của trường XYZ.
-        Đây là đoạn hội thoại trước: 
-        {chat_history}
-        === CÂU TRẢ LỜI CHÍNH THỨC ===
-        {context}
+        db = SessionLocal()
+        try:
+            # 🧩 1. Lưu tin nhắn người dùng
+            user_msg = ChatInteraction(
+                message_text=query,
+                timestamp=datetime.now(),
+                rating=None,
+                is_from_bot=False,
+                sender_id=user_id,
+                session_id=session_id
+            )
+            db.add(user_msg)
+            db.flush()  # flush để lấy ID nếu cần liên kết sau
+            memory = memory_service.get_memory(session_id)
+            mem_vars = memory.load_memory_variables({})
+            chat_history = mem_vars.get("chat_history", "")
 
-        === CÂU HỎI NGƯỜI DÙNG ===
-        {query}
+            prompt = f"""
+            Bạn là chatbot tư vấn tuyển sinh của trường XYZ.
+            Đây là đoạn hội thoại trước: 
+            {chat_history}
+            === CÂU TRẢ LỜI CHÍNH THỨC ===
+            {context}
 
-        === HƯỚNG DẪN TRẢ LỜI ===
-        - Hãy đọc kỹ phần NGỮ CẢNH LIÊN QUAN, nhưng **chỉ sử dụng nó nếu thật sự có nội dung trùng khớp hoặc phù hợp với câu hỏi người dùng.**
-        - Nếu phần CÂU TRẢ LỜI CHÍNH THỨC không liên quan rõ ràng đến câu hỏi, **đừng cố trả lời theo context** mà hãy nói:
-        “Hiện chưa có thông tin chính xác cho câu hỏi này. Bạn có thể nói rõ chi tiết hơn được không?” 
-        - Nếu phần trả lời chính thức không phù hợp với câu hỏi, hãy nói “Hiện chưa có thông tin cho câu hỏi này. Vui lòng liên hệ chuyên viên tư vấn.”
-        - Bạn là chatbot tư vấn tuyển sinh của trường xyz, nhớ kiểm tra kĩ rõ ràng câu hỏi, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
-        - Nếu câu hỏi chỉ là chào hỏi, hỏi thời tiết, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
-        - Nếu câu hỏi quá mơ hồ, hãy hỏi lại để rõ hơn và chi tiết hơn về câu hỏi
-        - Có thể **diễn đạt lại câu hỏi hoặc thông tin** một cách nhẹ nhàng, tự nhiên để người dùng dễ hiểu hơn, **nhưng tuyệt đối không thay đổi ý nghĩa hay thêm dữ kiện mới.**
-        - Khi có thể, hãy **giải thích thêm bối cảnh hoặc gợi ý bước tiếp theo**, ví dụ:  
-            “Bạn muốn mình gửi danh sách ngành đào tạo kèm chuyên ngành chi tiết không?”  
-            hoặc  
-            “Nếu bạn quan tâm học bổng, mình có thể nói rõ các loại học bổng hiện có nhé!”
-        """
-        full_response = ""
-        async for chunk in self.llm.astream(prompt):
-            yield chunk
-            full_response += chunk 
-            await asyncio.sleep(0)  # Nhường event loop
+            === CÂU HỎI NGƯỜI DÙNG ===
+            {query}
 
-        memory.save_context({"input": query}, {"output": full_response})  
-        print("Saved to memory. Current messages:", len(self.memory.chat_memory.messages)) 
+            === HƯỚNG DẪN TRẢ LỜI ===
+            - Hãy đọc kỹ phần NGỮ CẢNH LIÊN QUAN, nhưng **chỉ sử dụng nó nếu thật sự có nội dung trùng khớp hoặc phù hợp với câu hỏi người dùng.**
+            - Nếu phần CÂU TRẢ LỜI CHÍNH THỨC không liên quan rõ ràng đến câu hỏi, **đừng cố trả lời theo context** mà hãy nói:
+            “Hiện chưa có thông tin chính xác cho câu hỏi này. Bạn có thể nói rõ chi tiết hơn được không?” 
+            - Nếu phần trả lời chính thức không phù hợp với câu hỏi, hãy nói “Hiện chưa có thông tin cho câu hỏi này. Vui lòng liên hệ chuyên viên tư vấn.”
+            - Bạn là chatbot tư vấn tuyển sinh của trường xyz, nhớ kiểm tra kĩ rõ ràng câu hỏi, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
+            - Nếu câu hỏi chỉ là chào hỏi, hỏi thời tiết, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
+            - Nếu câu hỏi quá mơ hồ, hãy hỏi lại để rõ hơn và chi tiết hơn về câu hỏi
+            - Có thể **diễn đạt lại câu hỏi hoặc thông tin** một cách nhẹ nhàng, tự nhiên để người dùng dễ hiểu hơn, **nhưng tuyệt đối không thay đổi ý nghĩa hay thêm dữ kiện mới.**
+            - Khi có thể, hãy **giải thích thêm bối cảnh hoặc gợi ý bước tiếp theo**, ví dụ:  
+                “Bạn muốn mình gửi danh sách ngành đào tạo kèm chuyên ngành chi tiết không?”  
+                hoặc  
+                “Nếu bạn quan tâm học bổng, mình có thể nói rõ các loại học bổng hiện có nhé!”
+            """
+            full_response = ""
+            async for chunk in self.llm.astream(prompt):
+                yield chunk
+                full_response += chunk 
+                await asyncio.sleep(0)  # Nhường event loop
+
+            memory.save_context({"input": query}, {"output": full_response})  
+            print("Saved to memory. Current messages:", len(self.memory.chat_memory.messages))
+
+            # === Lưu bot response vào DB ===
+            bot_msg = ChatInteraction(
+                message_text=full_response,
+                timestamp=datetime.now(),
+                rating=None,
+                is_from_bot=True,
+                sender_id=None,
+                session_id=session_id
+            )
+            db.add(bot_msg)
+
+            # 🧩 5. Commit 1 lần duy nhất
+            db.commit()
+            print(f"💾 Saved both user+bot messages for session {session_id}")
+        except SQLAlchemyError as e:
+            db.rollback()
+            print(f" Database error during chat transaction: {e}")
+        finally:
+            db.close() 
     
-    def add_document(self, document_id: int, content: str, metadata: dict = None):
+    def add_document(self, document_id: int, content: str, intend_id: int, metadata: dict = None):
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,      # Size optimal cho Vietnamese
             chunk_overlap=200     # Overlap to preserve context
@@ -359,6 +392,7 @@ class TrainingService:
                             "document_id": document_id,
                             "chunk_index": i,
                             "chunk_text": chunk,
+                            "intend_id": intend_id,
                             "metadata": metadata or {},
                             "type": "document"
                         }
@@ -413,7 +447,7 @@ class TrainingService:
                     vector=embedding,
                     payload={
                         "question_id": new_qa.question_id,
-                        "intent_id": 1,
+                        "intent_id": intent_id,
                         "question_text": question_text,
                         "answer_text": answer_text,
                         "type": "training_qa"
@@ -535,12 +569,190 @@ class TrainingService:
                 "response": doc_results,
                 "response_source": "document",
                 "confidence": doc_results[0].score,
-                "top_match": None,
-                "intent_id": None,
+                "top_match": doc_results[0],
+                "intent_id": doc_results[0].payload.get("intent_id"),
                 "sources": [r.payload.get("document_id") for r in doc_results]
             }
         
-      
+    def _get_user_personality_and_academics(self, user_id: int, db: Session) -> Dict[str, Any]:
+        out = {
+            "personality_summary": None,
+            "riasec": None,
+            "academic_summary": None,
+            "gpa": None,
+            "subjects": {}
+        }
+
+        # --- RIASEC result ---
+        ri = (
+            db.query(RiasecResult)
+            .filter(RiasecResult.customer_id == user_id)
+            .order_by(RiasecResult.result_id.desc())
+            .first()
+        )
+
+        if ri:
+            out["riasec"] = {
+                "R": ri.score_realistic,
+                "I": ri.score_investigative,
+                "A": ri.score_artistic,
+                "S": ri.score_social,
+                "E": ri.score_enterprising,
+                "C": ri.score_conventional,
+            }
+            # `result` field = summary của bạn
+            out["personality_summary"] = ri.result or self._riasec_to_summary(out["riasec"])
+
+        # --- Academic scores ---
+        scores = (
+            db.query(AcademicScore)
+            .filter(AcademicScore.customer_id == user_id)
+            .all()
+        )
+
+        if scores:
+            subj_map = {s.subject_name: s.score for s in scores}
+
+            # simple GPA = average score
+            gpa = round(sum([s.score for s in scores]) / len(scores), 2)
+
+            out["subjects"] = subj_map
+            out["gpa"] = gpa
+            out["academic_summary"] = (
+                f"GPA xấp xỉ {gpa}. Các môn: " +
+                ", ".join([f"{k}: {v}" for k, v in subj_map.items()])
+            )
+
+        return out
+
+    def _riasec_to_summary(self, ri_map: Dict[str,int]) -> str:
+        # very small helper - bạn có thể mở rộng
+        order = sorted(ri_map.items(), key=lambda x: -x[1])
+        top = order[0][0] if order else None
+        return f"Ưu thế RIASEC: {', '.join([f'{k}={v}' for k,v in ri_map.items()])}. Chính: {top}."
+
+    def _get_all_majors_from_db(self, db: Session, limit: int = 200) -> List[Dict[str,Any]]:
+        """
+        Lấy danh sách majors (id, name, short_description, requirements)
+        Giả sử bạn có model Major với fields: major_id, name, description, requirements
+        """
+        rows = db.query(Major).order_by(Major.major_name).limit(limit).all()
+        majors = []
+        for r in rows:
+            majors.append({
+                "major_id": r.major_id,
+                "name": r.major_name,
+            })
+        return majors
+
+ 
+    async def stream_response_from_recommendation(
+        self,
+        user_id: int,
+        session_id: int,
+        query: str
+    ):
+        db = SessionLocal()
+        try:
+            # 🧩 1. Lưu tin nhắn người dùng
+            user_msg = ChatInteraction(
+                message_text=query,
+                timestamp=datetime.now(),
+                rating=None,
+                is_from_bot=False,
+                sender_id=user_id,
+                session_id=session_id
+            )
+            db.add(user_msg)
+            db.flush()  # flush để lấy ID nếu cần liên kết sau
+            memory = memory_service.get_memory(session_id)
+            mem_vars = memory.load_memory_variables({})
+            chat_history = mem_vars.get("chat_history", "")
+
+            user_profile = self._get_user_personality_and_academics(user_id, db)
+            majors = self._get_all_majors_from_db(db, limit=200)
+
+            personality = user_profile.get("personality_summary") or ""
+            academic_summary = user_profile.get("academic_summary") or ""
+            gpa = user_profile.get("gpa", "")
+
+            # Rút gọn danh sách ngành
+            maj_texts = []
+            for m in majors:
+                maj_texts.append(f"- [{m['major_id']}] {m['name']}: {m['description'][:240]}")
+
+            prompt = f"""
+        Bạn là chatbot tư vấn tuyển sinh. Nhiệm vụ của bạn ở tầng Recommendation là:
+        **CHỈ tư vấn chọn ngành khi câu hỏi của người dùng thật sự liên quan. Đề xuất theo tính cách có thể dựa vào kết quả RIASEC Result**
+        Nếu câu hỏi KHÔNG yêu cầu:
+        - tư vấn chọn ngành
+        - ngành phù hợp
+        - chọn ngành theo học bạ / RIASEC
+        - đề xuất ngành
+        - phù hợp ngành nào
+        - đề xuất theo tính cách
+        → Nếu KHÔNG liên quan → trả lời đúng duy nhất câu:
+            "Xin lỗi, hiện tại mình chưa có thông tin chính xác cho câu hỏi này. 
+            Bạn vui lòng liên hệ với chuyên viên tư vấn để biết thêm thông tin chi tiết"
+        Đây là đoạn hội thoại trước: 
+            {chat_history}
+        ===========================
+        ### THÔNG TIN HỒ SƠ NGƯỜI DÙNG
+        Personality summary(RIASEC Result):
+        {personality}
+
+        Academic summary(học bạ):
+        {academic_summary}
+
+        
+
+        ===========================
+        ### DANH SÁCH CÁC NGÀNH
+        {chr(10).join(maj_texts)}
+
+        ===========================
+        ### CÂU HỎI NGƯỜI DÙNG
+        "{query}"
+
+        ===========================
+        ### HƯỚNG DẪN XỬ LÝ
+
+        1. **Đầu tiên, hãy kiểm tra xem câu hỏi có thật sự liên quan đến việc tư vấn chọn ngành hay không, hay câu hỏi có liên quan đến thông tin hồ sơ người dùng hay không.**
+        - Nếu KHÔNG liên quan → trả lời đúng duy nhất câu:
+            "Hiện chưa có thông tin chính xác cho câu hỏi này. Bạn có thể nói rõ chi tiết hơn được không?"
+        - Không được viết khác, không được thêm diễn giải.
+        2. Nếu câu hỏi có liên quan đến tư vấn chọn ngành hay có liên quan đến thông tin hồ sơ người dùng mà hồ sơ người dùng trống thì hãy yêu cầu người dùng nhập những thông tin này để được tư vấn dựa vào thông tin hồ sơ người dùng.
+        3. Nếu thiếu dữ liệu học bạ hay thiếu dữ liệu RIASEC Result → ghi rõ trong reason: **"thiếu dữ liệu [__]"**
+    
+        """
+            full_response = ""
+            async for chunk in self.llm.astream(prompt):
+                yield chunk
+                full_response += chunk 
+                await asyncio.sleep(0)  # Nhường event loop
+
+            memory.save_context({"input": query}, {"output": full_response})  
+            print("Saved to memory. Current messages:", len(self.memory.chat_memory.messages))
+
+            # === Lưu bot response vào DB ===
+            bot_msg = ChatInteraction(
+                message_text=full_response,
+                timestamp=datetime.now(),
+                rating=None,
+                is_from_bot=True,
+                sender_id=None,
+                session_id=session_id
+            )
+            db.add(bot_msg)
+
+            # 🧩 5. Commit 1 lần duy nhất
+            db.commit()
+            print(f"💾 Saved both user+bot messages for session {session_id}")
+        except SQLAlchemyError as e:
+            db.rollback()
+            print(f" Database error during chat transaction: {e}")
+        finally:
+            db.close()
 
     
 
