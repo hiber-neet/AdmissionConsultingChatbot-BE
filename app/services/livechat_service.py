@@ -93,7 +93,6 @@ class LiveChatService:
         try:
             queue_item = db.query(LiveChatQueue).filter_by(id=queue_id).first()
             if not queue_item:
-                print(f"DEBUG: Queue item with id {queue_id} not found")
                 return {"error": "queue_not_found"}
 
             official = db.query(AdmissionOfficialProfile).filter_by(
@@ -101,10 +100,7 @@ class LiveChatService:
             ).first()
             
             if not official:
-                print(f"DEBUG: AdmissionOfficialProfile for official_id {official_id} not found")
                 return {"error": "official_not_found"}
-
-            print(f"DEBUG: Found official with current_sessions={official.current_sessions}, max_sessions={official.max_sessions}")
 
             if official.current_sessions >= official.max_sessions:
                 return {"error": "max_sessions_reached"}
@@ -113,7 +109,6 @@ class LiveChatService:
             customer_id = queue_item.customer_id
 
             # Tạo live chat session
-            print(f"DEBUG: Creating ChatSession")
             session = ChatSession(
                 session_type="live",
                 start_time=datetime.now()
@@ -122,46 +117,29 @@ class LiveChatService:
             db.commit()
             db.refresh(session)
             session_id = session.chat_session_id
-            print(f"DEBUG: Created ChatSession with id {session_id}")
 
             # Create participants
-            print(f"DEBUG: Creating ParticipateChatSession records")
             participant1 = ParticipateChatSession(user_id=customer_id, session_id=session_id)
             participant2 = ParticipateChatSession(user_id=official_id, session_id=session_id)
             
             db.add_all([participant1, participant2])
 
-            official.current_sessions += 1
-            queue_item.status = "accepted"
-            db.commit()
-            print(f"DEBUG: Successfully updated official sessions and queue status")
-
-        except Exception as e:
-            db.rollback()
-            print(f"ERROR in official_accept: {str(e)}")
-            print(f"ERROR type: {type(e).__name__}")
-            import traceback
-            traceback.print_exc()
-            return {"error": f"internal_error: {str(e)}"}
-        finally:
-            db.close()
-
-        # SSE → notify student (only if we have the required data)
-        if customer_id and session_id:
-            await self.send_customer_event(customer_id, {
-                "event": "accepted",
-                "session_id": session_id,
-                "official_id": official_id
-            })
-
             # SSE → update queue list cho AO
             await self.send_official_event(official_id, {
                 "event": "queue_updated"
             })
-        
-        return {"success": True, "session_id": session_id}
+            official.current_sessions += 1
+            queue_item.status = "accepted"
+            db.commit()
+            db.close()
+            
+            return session
 
-        return session
+        except Exception as e:
+            db.rollback()
+            db.close()
+            print(f"ERROR in official_accept: {str(e)}")
+            return {"error": f"internal_error: {str(e)}"}
 
     # ======================================================================
     # 3. AO REJECT REQUEST

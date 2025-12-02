@@ -1,17 +1,12 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
-from typing import List, Optional
-import uuid
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 import asyncio
 import json
+from app.services import training_service
 from app.services.training_service import TrainingService
-from pathlib import Path
+
 
 router = APIRouter()
-#thêm 2 tầng check chat
+#thêm 3 tầng check chat
 @router.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     # session_id = 1
@@ -88,11 +83,12 @@ async def websocket_chat(websocket: WebSocket):
                 top = result["top_match"]
                 q_text = top.payload.get("question_text")
                 a_text = top.payload.get("answer_text")
+                intent_id = top.payload.get("intent_id")
                 relevance_ok = await service.llm_relevance_check(enriched_query, q_text, a_text)
 
                 if relevance_ok:
                     print("✅ floor 1: training QA valid")
-                    async for chunk in service.stream_response_from_qa(enriched_query, a_text):
+                    async for chunk in service.stream_response_from_qa(enriched_query, a_text, intent_id):
                         await websocket.send_text(json.dumps({
                             "event": "chunk",
                             "content": getattr(chunk, "content", str(chunk))
@@ -109,6 +105,7 @@ async def websocket_chat(websocket: WebSocket):
                     doc_results = service.search_documents(enriched_query, top_k=5)
                     result = {
                         "response": doc_results,
+                        "intent_id": doc_results[0].payload.get("intent_id"),
                         "response_source": "document",
                         "confidence": doc_results[0].score if doc_results else 0.0,
                         "sources": [r.payload.get("document_id") for r in doc_results]
@@ -119,13 +116,14 @@ async def websocket_chat(websocket: WebSocket):
             if tier_source == "document" or confidence < 0.75:
                 print("🔍 floor 3: using document context")
                 context_chunks = result["response"]
+                intend_id = result["intend_id"]
                 context = "\n\n".join([
                     r.payload.get("chunk_text", "") for r in context_chunks
                 ])
                 is_recommendation = await service.llm_recommendation_check(enriched_query, context)
                 if is_recommendation:
                     async for chunk in service.stream_response_from_context(
-                        enriched_query, context, session_id, user_id
+                        enriched_query, context, session_id, user_id, intend_id
                     ):
                         await websocket.send_text(json.dumps({
                             "event": "chunk",
@@ -184,13 +182,35 @@ Bạn vui lòng liên hệ với chuyên viên tư vấn để biết thêm thô
         # memory_manager.remove_memory(session_id)
         print("Client disconnected")
 
+    # Tạo 1 phiên chat session mới
+    @router.post("/session/create")
+    def api_create_chat_session(user_id: int, session_type: str):
+        try:
+            session_id = training_service.create_chat_session(
+                user_id=user_id,
+                session_type=session_type
+            )
+            return {"session_id": session_id, "message": "Session created successfully"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))       
 
-            
+    # Lấy lịch sử chat theo session ID
+    @router.get("/session/{session_id}/history")
+    def api_get_session_history(session_id: int, limit: int = 50):
+        try:
+            history = training_service.get_session_history(session_id, limit)
+            return {"session_id": session_id, "messages": history}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
-
-
-
-
+    # Lấy tất cả session của user
+    @router.get("/user/{user_id}/sessions")
+    def api_get_user_sessions(user_id: int):
+        try:
+            sessions = training_service.get_user_sessions(user_id)
+            return {"user_id": user_id, "sessions": sessions}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 
