@@ -9,7 +9,7 @@ import os
 import uuid
 import asyncio
 from sqlalchemy.orm import Session
-from app.models.entities import AcademicScore, ChatInteraction, ChatSession, Major, ParticipateChatSession, RiasecResult, TrainingQuestionAnswer
+from app.models.entities import AcademicScore, ChatInteraction, ChatSession, FaqStatistics, Major, ParticipateChatSession, RiasecResult, TrainingQuestionAnswer
 from app.models.database import SessionLocal
 from sqlalchemy.exc import SQLAlchemyError
 from app.services.memory_service import MemoryManager
@@ -262,7 +262,41 @@ class TrainingService:
         if last_user_msg:
             memory.save_context({"input": last_user_msg}, {"output": ""})
 
-    async def stream_response_from_context(self, query: str, context: str, session_id: int = 1, user_id: int = 1):
+    def update_faq_statistics(db: Session, question_text: str, answer_text: str, intent_id: int):
+        """
+        Tăng usage_count cho một Q&A đã dùng (Tier 1).
+        - Tạo mới nếu chưa có.
+        - Cập nhật usage_count và last_used_at nếu đã tồn tại.
+        """
+        try:
+            faq_stat = db.query(FaqStatistics).filter(FaqStatistics.intent_id == intent_id).first()
+
+            if faq_stat:
+                # Cập nhật nếu đã tồn tại
+                faq_stat.usage_count =  (faq_stat.usage_count or 0) + 1
+                faq_stat.last_used_at = datetime.now()
+            else:
+                # Tạo mới nếu chưa tồn tại
+                new_stat = FaqStatistics(
+                    usage_count=1,
+                    success_rate=None,
+                    question_text=question_text,  # Placeholder
+                    answer_text=answer_text,      # Placeholder
+                    rating=None,
+                    last_used_at=datetime.now(),
+                    intent_id=intent_id
+                )
+                db.add(new_stat)
+
+            db.commit()
+            
+
+        except Exception as e:
+            db.rollback()
+            print(f"Error updating FaqStatistics: {e}")
+            
+
+    async def stream_response_from_context(self, query: str, context: str, session_id: int = 1, user_id: int = 1, intent_id: int = 1):
         db = SessionLocal()
         
         try:
@@ -321,8 +355,11 @@ class TrainingService:
             )
             db.add(bot_msg)
 
+
+
             # 🧩 5. Commit 1 lần duy nhất
             db.commit()
+            self.update_faq_statistics(db, question_text = query, answer_text = full_response, intent_id = intent_id)
             print(f"💾 Saved both user+bot messages for session {session_id}")
         except SQLAlchemyError as e:
             db.rollback()
@@ -330,7 +367,7 @@ class TrainingService:
         finally:
             db.close()
 
-    async def stream_response_from_qa(self, query: str, context: str, session_id: int = 1, user_id: int = 1):
+    async def stream_response_from_qa(self, query: str, context: str, session_id: int = 1, user_id: int = 1, intent_id: int = 1):
         db = SessionLocal()
         try:
             # 🧩 1. Lưu tin nhắn người dùng
@@ -394,6 +431,7 @@ class TrainingService:
 
             # 🧩 5. Commit 1 lần duy nhất
             db.commit()
+            self.update_faq_statistics(db, question_text = query, answer_text = full_response, intent_id = intent_id)
             print(f"💾 Saved both user+bot messages for session {session_id}")
         except SQLAlchemyError as e:
             db.rollback()
@@ -401,6 +439,103 @@ class TrainingService:
         finally:
             db.close() 
     
+    async def stream_response_from_recommendation(
+        self,
+        user_id: int,
+        session_id: int,
+        query: str
+    ):
+        db = SessionLocal()
+        try:
+            # 🧩 1. Lưu tin nhắn người dùng
+            user_msg = ChatInteraction(
+                message_text=query,
+                timestamp=datetime.now(),
+                rating=None,
+                is_from_bot=False,
+                sender_id=user_id,
+                session_id=session_id
+            )
+            db.add(user_msg)
+            db.flush()  # flush để lấy ID nếu cần liên kết sau
+            memory = memory_service.get_memory(session_id)
+            mem_vars = memory.load_memory_variables({})
+            chat_history = mem_vars.get("chat_history", "")
+
+            user_profile = self._get_user_personality_and_academics(user_id, db)
+            majors = self._get_all_majors_from_db(db, limit=200)
+
+            personality = user_profile.get("personality_summary") or ""
+            academic_summary = user_profile.get("academic_summary") or ""
+            gpa = user_profile.get("gpa", "")
+
+            # Rút gọn danh sách ngành
+            maj_texts = []
+            for m in majors:
+                maj_texts.append(f"- [{m['major_id']}]: {m['major_name']}")
+
+            prompt = f"""
+        Bạn là chatbot tư vấn tuyển sinh của trường đại học XYZ. Nhiệm vụ của bạn là tư vấn chọn ngành:
+        **CHỈ tư vấn chọn ngành khi câu hỏi của người dùng thật sự liên quan.**
+        
+        Đây là đoạn hội thoại trước: 
+            {chat_history}
+        ===========================
+        ### THÔNG TIN HỒ SƠ NGƯỜI DÙNG
+        Personality summary(RIASEC Result):
+        {personality}
+
+        Academic summary(học bạ):
+        {academic_summary}
+
+        
+
+        ===========================
+        ### DANH SÁCH CÁC NGÀNH
+        {chr(10).join(maj_texts)}
+
+        ===========================
+        ### CÂU HỎI NGƯỜI DÙNG
+        "{query}"
+
+        ===========================
+        ### HƯỚNG DẪN XỬ LÝ
+
+        1. **Đầu tiên, hãy kiểm tra xem câu hỏi có thật sự liên quan đến việc tư vấn chọn ngành hay không, hoặc câu hỏi có liên quan đến thông tin hồ sơ người dùng hay không.**
+        - Nếu KHÔNG liên quan → bạn hãy tự tạo câu phản hồi phù hợp với CÂU HỎI NGƯỜI DÙNG
+        2. Nếu câu hỏi có liên quan đến thông tin hồ sơ người dùng ở trên bao gồm RIASEC Result và học bạ mà hồ sơ người dùng trống thì hãy yêu cầu người dùng nhập những thông tin này như RIASEC Result hoặc học bạ, 1 trong 2 là có thể được tư vấn dựa vào thông tin hồ sơ người dùng. Đề xuất theo tính cách có thể dựa vào kết quả RIASEC Result của THÔNG TIN HỒ SƠ NGƯỜI DÙNG
+        3. Nếu câu hỏi không liên quan thì hãy từ chối yêu cầu và đề nghị nhắn trực tiếp bên tuyển sinh
+    
+        """
+            full_response = ""
+            async for chunk in self.llm.astream(prompt):
+                yield chunk
+                full_response += chunk 
+                await asyncio.sleep(0)  # Nhường event loop
+
+            memory.save_context({"input": query}, {"output": full_response})  
+            print("Saved to memory. Current messages:", len(memory.chat_memory.messages))
+
+            # === Lưu bot response vào DB ===
+            bot_msg = ChatInteraction(
+                message_text=full_response,
+                timestamp=datetime.now(),
+                rating=None,
+                is_from_bot=True,
+                sender_id=None,
+                session_id=session_id
+            )
+            db.add(bot_msg)
+
+            # 🧩 5. Commit 1 lần duy nhất
+            db.commit()
+            print(f"💾 Saved both user+bot messages for session {session_id}")
+        except SQLAlchemyError as e:
+            db.rollback()
+            print(f" Database error during chat transaction: {e}")
+        finally:
+            db.close()
+
     def add_document(self, document_id: int, content: str, intend_id: int, metadata: dict = None):
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,      # Size optimal cho Vietnamese
@@ -680,103 +815,8 @@ class TrainingService:
             })
         return majors
 
- 
-    async def stream_response_from_recommendation(
-        self,
-        user_id: int,
-        session_id: int,
-        query: str
-    ):
-        db = SessionLocal()
-        try:
-            # 🧩 1. Lưu tin nhắn người dùng
-            user_msg = ChatInteraction(
-                message_text=query,
-                timestamp=datetime.now(),
-                rating=None,
-                is_from_bot=False,
-                sender_id=user_id,
-                session_id=session_id
-            )
-            db.add(user_msg)
-            db.flush()  # flush để lấy ID nếu cần liên kết sau
-            memory = memory_service.get_memory(session_id)
-            mem_vars = memory.load_memory_variables({})
-            chat_history = mem_vars.get("chat_history", "")
-
-            user_profile = self._get_user_personality_and_academics(user_id, db)
-            majors = self._get_all_majors_from_db(db, limit=200)
-
-            personality = user_profile.get("personality_summary") or ""
-            academic_summary = user_profile.get("academic_summary") or ""
-            gpa = user_profile.get("gpa", "")
-
-            # Rút gọn danh sách ngành
-            maj_texts = []
-            for m in majors:
-                maj_texts.append(f"- [{m['major_id']}]: {m['major_name']}")
-
-            prompt = f"""
-        Bạn là chatbot tư vấn tuyển sinh của trường đại học XYZ. Nhiệm vụ của bạn là tư vấn chọn ngành:
-        **CHỈ tư vấn chọn ngành khi câu hỏi của người dùng thật sự liên quan.**
-        
-        Đây là đoạn hội thoại trước: 
-            {chat_history}
-        ===========================
-        ### THÔNG TIN HỒ SƠ NGƯỜI DÙNG
-        Personality summary(RIASEC Result):
-        {personality}
-
-        Academic summary(học bạ):
-        {academic_summary}
-
-        
-
-        ===========================
-        ### DANH SÁCH CÁC NGÀNH
-        {chr(10).join(maj_texts)}
-
-        ===========================
-        ### CÂU HỎI NGƯỜI DÙNG
-        "{query}"
-
-        ===========================
-        ### HƯỚNG DẪN XỬ LÝ
-
-        1. **Đầu tiên, hãy kiểm tra xem câu hỏi có thật sự liên quan đến việc tư vấn chọn ngành hay không, hoặc câu hỏi có liên quan đến thông tin hồ sơ người dùng hay không.**
-        - Nếu KHÔNG liên quan → bạn hãy tự tạo câu phản hồi phù hợp với CÂU HỎI NGƯỜI DÙNG
-        2. Nếu câu hỏi có liên quan đến thông tin hồ sơ người dùng ở trên bao gồm RIASEC Result và học bạ mà hồ sơ người dùng trống thì hãy yêu cầu người dùng nhập những thông tin này như RIASEC Result hoặc học bạ, 1 trong 2 là có thể được tư vấn dựa vào thông tin hồ sơ người dùng. Đề xuất theo tính cách có thể dựa vào kết quả RIASEC Result của THÔNG TIN HỒ SƠ NGƯỜI DÙNG
-        3. Nếu câu hỏi không liên quan thì hãy từ chối yêu cầu và đề nghị nhắn trực tiếp bên tuyển sinh
     
-        """
-            full_response = ""
-            async for chunk in self.llm.astream(prompt):
-                yield chunk
-                full_response += chunk 
-                await asyncio.sleep(0)  # Nhường event loop
-
-            memory.save_context({"input": query}, {"output": full_response})  
-            print("Saved to memory. Current messages:", len(memory.chat_memory.messages))
-
-            # === Lưu bot response vào DB ===
-            bot_msg = ChatInteraction(
-                message_text=full_response,
-                timestamp=datetime.now(),
-                rating=None,
-                is_from_bot=True,
-                sender_id=None,
-                session_id=session_id
-            )
-            db.add(bot_msg)
-
-            # 🧩 5. Commit 1 lần duy nhất
-            db.commit()
-            print(f"💾 Saved both user+bot messages for session {session_id}")
-        except SQLAlchemyError as e:
-            db.rollback()
-            print(f" Database error during chat transaction: {e}")
-        finally:
-            db.close()
+    
 
     
 
