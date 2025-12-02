@@ -463,6 +463,7 @@ class Article(Base):
     title = Column(String)
     description = Column(String)
     url = Column(String)
+    link_image = Column(String)
     note = Column(String)
     # content = Column(Text)
     status = Column(String, default="draft")  # Values: draft, published, rejected, cancelled
