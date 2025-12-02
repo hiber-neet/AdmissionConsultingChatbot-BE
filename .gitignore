@@ -11,3 +11,5 @@ create_test_data.py
 test_analytics.py
 test_enhanced_gaps.py
 test_category_api.py
+test_data_script.py
+test_end_session.py

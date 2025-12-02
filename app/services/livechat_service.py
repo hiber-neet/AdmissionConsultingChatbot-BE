@@ -9,6 +9,7 @@ from app.models.entities import (
     LiveChatQueue,
     ParticipateChatSession,
     AdmissionOfficialProfile,
+    Users,
 )
 
 
@@ -86,48 +87,79 @@ class LiveChatService:
     # ======================================================================
     async def official_accept(self, official_id: int, queue_id: int):
         db = SessionLocal()
+        customer_id = None
+        session_id = None
 
-        queue_item = db.query(LiveChatQueue).filter_by(id=queue_id).first()
-        if not queue_item:
-            return {"error": "queue_not_found"}
+        try:
+            queue_item = db.query(LiveChatQueue).filter_by(id=queue_id).first()
+            if not queue_item:
+                print(f"DEBUG: Queue item with id {queue_id} not found")
+                return {"error": "queue_not_found"}
 
-        official = db.query(AdmissionOfficialProfile).filter_by(
-            admission_official_id=official_id
-        ).first()
+            official = db.query(AdmissionOfficialProfile).filter_by(
+                admission_official_id=official_id
+            ).first()
+            
+            if not official:
+                print(f"DEBUG: AdmissionOfficialProfile for official_id {official_id} not found")
+                return {"error": "official_not_found"}
 
-        if official.current_sessions >= official.max_sessions:
-            return {"error": "max_sessions_reached"}
+            print(f"DEBUG: Found official with current_sessions={official.current_sessions}, max_sessions={official.max_sessions}")
 
-        # Tạo live chat session
-        session = ChatSession(
-            session_type="live",
-            start_time=datetime.now()
-        )
-        db.add(session)
-        db.commit()
-        db.refresh(session)
+            if official.current_sessions >= official.max_sessions:
+                return {"error": "max_sessions_reached"}
 
-        db.add_all([
-            ParticipateChatSession(user_id=queue_item.customer_id, session_id=session.chat_session_id),
-            ParticipateChatSession(user_id=official_id, session_id=session.chat_session_id),
-        ])
+            # Store customer_id before any potential session issues
+            customer_id = queue_item.customer_id
 
-        official.current_sessions += 1
-        queue_item.status = "accepted"
-        db.commit()
-        db.close()
+            # Tạo live chat session
+            print(f"DEBUG: Creating ChatSession")
+            session = ChatSession(
+                session_type="live",
+                start_time=datetime.now()
+            )
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+            session_id = session.chat_session_id
+            print(f"DEBUG: Created ChatSession with id {session_id}")
 
-        # SSE → notify student
-        await self.send_customer_event(queue_item.customer_id, {
-            "event": "accepted",
-            "session_id": session.chat_session_id,
-            "official_id": official_id
-        })
+            # Create participants
+            print(f"DEBUG: Creating ParticipateChatSession records")
+            participant1 = ParticipateChatSession(user_id=customer_id, session_id=session_id)
+            participant2 = ParticipateChatSession(user_id=official_id, session_id=session_id)
+            
+            db.add_all([participant1, participant2])
 
-        # SSE → update queue list cho AO
-        await self.send_official_event(official_id, {
-            "event": "queue_updated"
-        })
+            official.current_sessions += 1
+            queue_item.status = "accepted"
+            db.commit()
+            print(f"DEBUG: Successfully updated official sessions and queue status")
+
+        except Exception as e:
+            db.rollback()
+            print(f"ERROR in official_accept: {str(e)}")
+            print(f"ERROR type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
+            return {"error": f"internal_error: {str(e)}"}
+        finally:
+            db.close()
+
+        # SSE → notify student (only if we have the required data)
+        if customer_id and session_id:
+            await self.send_customer_event(customer_id, {
+                "event": "accepted",
+                "session_id": session_id,
+                "official_id": official_id
+            })
+
+            # SSE → update queue list cho AO
+            await self.send_official_event(official_id, {
+                "event": "queue_updated"
+            })
+        
+        return {"success": True, "session_id": session_id}
 
         return session
 
@@ -197,50 +229,73 @@ class LiveChatService:
     # ===============================================================
     async def end_session(self, session_id: int, ended_by: int):
         db = SessionLocal()
+        try:
+            session = db.query(ChatSession).filter_by(chat_session_id=session_id).first()
+            if not session:
+                return {"error": "session_not_found"}
 
-        session = db.query(ChatSession).filter_by(chat_session_id=session_id).first()
-        if not session:
-            return {"error": "session_not_found"}
+            # Check if session is already ended
+            if session.end_time is not None:
+                return {"error": "session_already_ended"}
 
-        session.end_time = datetime.now()
-        db.commit()
-
-        # tìm official để giảm session count
-        official_part = db.query(ParticipateChatSession).filter(
-            ParticipateChatSession.session_id == session_id
-        ).all()
-
-        # lấy official id
-        official_id = None
-        for p in official_part:
-            if p.user_id != ended_by:
-                official_id = p.user_id
-                break
-
-        if official_id:
-            profile = db.query(AdmissionOfficialProfile).filter_by(
-                admission_official_id=official_id
+            # Verify that the user ending the session is a participant
+            participant = db.query(ParticipateChatSession).filter(
+                ParticipateChatSession.session_id == session_id,
+                ParticipateChatSession.user_id == ended_by
             ).first()
-            if profile:
-                profile.current_sessions -= 1
-                db.commit()
+            
+            if not participant:
+                return {"error": "not_session_participant"}
 
-        db.close()
+            # Find all participants to identify the official
+            all_participants = db.query(ParticipateChatSession).filter(
+                ParticipateChatSession.session_id == session_id
+            ).all()
 
-        # push realtime cho cả student + official cùng session
-        payload = {
-            "event": "chat_ended",
-            "session_id": session_id,
-            "ended_by": ended_by
-        }
+            # Find the official (check if any participant is an admission official)
+            official_id = None
+            for p in all_participants:
+                # Check if this user is an admission official
+                profile = db.query(AdmissionOfficialProfile).filter_by(
+                    admission_official_id=p.user_id
+                ).first()
+                if profile:
+                    official_id = p.user_id
+                    break
 
-        for conn in self.active_sessions.get(session_id, []):
-            await conn.send_json(payload)
+            # End the session
+            session.end_time = datetime.now().date()
+            
+            # Decrease official's current session count if found
+            if official_id:
+                profile = db.query(AdmissionOfficialProfile).filter_by(
+                    admission_official_id=official_id
+                ).first()
+                if profile and profile.current_sessions > 0:
+                    profile.current_sessions -= 1
 
-        # cleanup
-        self.active_sessions.pop(session_id, None)
+            db.commit()
 
-        return {"success": True}
+            # Push realtime notification to all connected participants
+            payload = {
+                "event": "chat_ended",
+                "session_id": session_id,
+                "ended_by": ended_by
+            }
+
+            for conn in self.active_sessions.get(session_id, []):
+                await conn.send_json(payload)
+
+            # Cleanup WebSocket connections
+            self.active_sessions.pop(session_id, None)
+
+            return {"success": True}
+            
+        except Exception as e:
+            db.rollback()
+            return {"error": f"database_error: {str(e)}"}
+        finally:
+            db.close()
 
     def get_my_status(self, customer_id: int):
         db = SessionLocal()
@@ -268,6 +323,56 @@ class LiveChatService:
         ).all()
         db.close()
         return items
+    
+    async def get_active_sessions(self, official_id: int):
+        """Get all active chat sessions for an admission official"""
+        db = SessionLocal()
+        try:
+            # Query for sessions where the official is a participant
+            # Use start_time and end_time to determine active status (started but not ended)
+            active_sessions_query = db.query(
+                ChatSession.chat_session_id,
+                ChatSession.start_time,
+                ChatSession.session_type
+            ).join(
+                ParticipateChatSession, 
+                ChatSession.chat_session_id == ParticipateChatSession.session_id
+            ).filter(
+                ParticipateChatSession.user_id == official_id,
+                ChatSession.start_time.isnot(None),  # Session has started
+                ChatSession.end_time.is_(None)  # Session hasn't ended (active)
+            ).all()
+            
+            result = []
+            for session in active_sessions_query:
+                session_id, start_time, session_type = session
+                
+                # For each session, find the customer (the other participant)
+                customer_participant = db.query(
+                    ParticipateChatSession, Users.full_name
+                ).join(
+                    Users, ParticipateChatSession.user_id == Users.user_id
+                ).filter(
+                    ParticipateChatSession.session_id == session_id,
+                    ParticipateChatSession.user_id != official_id
+                ).first()
+                
+                if customer_participant:
+                    participant, customer_name = customer_participant
+                    
+                    result.append({
+                        'session_id': session_id,
+                        'customer_id': participant.user_id,
+                        'customer_name': customer_name,
+                        'session_type': session_type or 'live',
+                        'start_time': start_time.isoformat() + 'T00:00:00' if start_time else datetime.now().isoformat(),
+                        'status': 'active'
+                    })
+            
+            return result
+            
+        finally:
+            db.close()
     
     def get_messages(self, session_id: int):
         db = SessionLocal()
