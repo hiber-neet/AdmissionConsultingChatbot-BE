@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Dict, List, Callable, Awaitable
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.database import SessionLocal
 from app.models.entities import (
@@ -298,9 +298,34 @@ class LiveChatService:
         items = db.query(LiveChatQueue).filter_by(
             admission_official_id=official_id,
             status="waiting"
+        ).options(
+            # Eagerly load customer information
+            joinedload(LiveChatQueue.customer)
         ).all()
+        
+        # Transform to include customer info
+        result = []
+        for item in items:
+            queue_item_dict = {
+                'id': item.id,
+                'customer_id': item.customer_id,
+                'admission_official_id': item.admission_official_id,
+                'status': item.status,
+                'created_at': item.created_at.isoformat() if item.created_at else None,
+                'customer': {
+                    'full_name': item.customer.full_name if item.customer else f'Customer {item.customer_id}',
+                    'email': item.customer.email if item.customer else 'N/A',
+                    'phone_number': item.customer.phone_number if item.customer else 'N/A'
+                } if item.customer else {
+                    'full_name': f'Customer {item.customer_id}',
+                    'email': 'N/A', 
+                    'phone_number': 'N/A'
+                }
+            }
+            result.append(queue_item_dict)
+        
         db.close()
-        return items
+        return result
     
     async def get_active_sessions(self, official_id: int):
         """Get all active chat sessions for an admission official"""
