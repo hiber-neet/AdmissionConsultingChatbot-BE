@@ -112,10 +112,7 @@ class LiveChatService:
             ParticipateChatSession(user_id=official_id, session_id=session.chat_session_id),
         ])
 
-        official.current_sessions += 1
-        queue_item.status = "accepted"
-        db.commit()
-        db.close()
+        
 
         # SSE → notify student
         await self.send_customer_event(queue_item.customer_id, {
@@ -128,7 +125,10 @@ class LiveChatService:
         await self.send_official_event(official_id, {
             "event": "queue_updated"
         })
-
+        official.current_sessions += 1
+        queue_item.status = "accepted"
+        db.commit()
+        db.close()
         return session
 
     # ======================================================================

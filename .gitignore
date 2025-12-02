@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
 # Local development documentation (exclude from repository)
 LOCAL_NOTES/
 SESSION_CHANGES/
@@ -14,3 +15,4 @@ create_test_data.py
 test_analytics.py
 test_enhanced_gaps.py
 test_category_api.py
+

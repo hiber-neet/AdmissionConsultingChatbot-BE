@@ -1,14 +1,8 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
-from typing import List, Optional
-import uuid
 import asyncio
 import json
 from app.services.training_service import TrainingService
-from pathlib import Path
+
 
 router = APIRouter()
 #thêm 2 tầng check chat
