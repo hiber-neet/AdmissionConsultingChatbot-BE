@@ -202,6 +202,38 @@ class TrainingService:
         r = res.strip().lower()
         return ("đúng" in r) or ("true" in r) or (r.startswith("đúng")) or (r.startswith("true"))
 
+    async def llm_recommendation_check(self, enriched_query: str, context: str) -> bool:
+        prompt = f"""
+        Bạn là hệ thống kiểm tra mức độ liên quan giữa câu hỏi người dùng và nội dung trong Document Base (RAG) cho chatbot RAG tư vấn tuyển sinh.
+
+        Yêu cầu:
+        - Chỉ trả về "true" nếu NỘI DUNG của document base THỰC SỰ có thông tin trả lời câu hỏi.
+        - Trả về "false" nếu:
+            • chỉ trùng từ khóa nhưng không cùng ý nghĩa
+            • document không chứa dữ liệu cần thiết để trả lời
+            • truy vấn là yêu cầu tư vấn cá nhân (Recommendation), không phải tìm kiến thức
+            • query chung chung như: "tôi hợp ngành nào", "hãy tư vấn", "mô tả về tôi", "nên học gì"
+            • context không cung cấp thông tin trực tiếp liên quan
+
+        Câu hỏi người dùng: "{enriched_query}"
+
+        Nội dung Document Base (context):
+        \"\"\"
+        {context}
+        \"\"\"
+
+        Hãy TRẢ LỜI DUY NHẤT:
+        - "true" → nếu document có thể trả lời chính xác câu này  
+        - "false" → nếu document KHÔNG PHÙ HỢP
+        """
+
+        res = await self.llm.ainvoke(prompt)
+        if not res:
+            return False
+        r = res.strip().lower()
+        return ("đúng" in r) or ("true" in r) or (r.startswith("đúng")) or (r.startswith("true"))
+
+
     async def load_session_history_to_memory(self, session_id: int, db: Session):
         memory = memory_service.get_memory(session_id)
 
@@ -297,6 +329,7 @@ class TrainingService:
             print(f" Database error during chat transaction: {e}")
         finally:
             db.close()
+
     async def stream_response_from_qa(self, query: str, context: str, session_id: int = 1, user_id: int = 1):
         db = SessionLocal()
         try:
@@ -402,6 +435,7 @@ class TrainingService:
             chunk_ids.append(point_id)
         
         return chunk_ids
+    
     def add_training_qa(self, db: Session, intent_id: int, question_text: str, answer_text: str):
         """
         Add training Q&A pair vào Qdrant
@@ -460,6 +494,7 @@ class TrainingService:
             "postgre_question_id": new_qa.question_id,
             "qdrant_question_id": point_id
         }
+    
     def search_documents(self, query: str, top_k: int = 5):
         """
         Search documents (Fallback)
@@ -641,7 +676,7 @@ class TrainingService:
         for r in rows:
             majors.append({
                 "major_id": r.major_id,
-                "name": r.major_name,
+                "major_name": r.major_name,
             })
         return majors
 
@@ -679,21 +714,12 @@ class TrainingService:
             # Rút gọn danh sách ngành
             maj_texts = []
             for m in majors:
-                maj_texts.append(f"- [{m['major_id']}] {m['name']}: {m['description'][:240]}")
+                maj_texts.append(f"- [{m['major_id']}]: {m['major_name']}")
 
             prompt = f"""
-        Bạn là chatbot tư vấn tuyển sinh. Nhiệm vụ của bạn ở tầng Recommendation là:
-        **CHỈ tư vấn chọn ngành khi câu hỏi của người dùng thật sự liên quan. Đề xuất theo tính cách có thể dựa vào kết quả RIASEC Result**
-        Nếu câu hỏi KHÔNG yêu cầu:
-        - tư vấn chọn ngành
-        - ngành phù hợp
-        - chọn ngành theo học bạ / RIASEC
-        - đề xuất ngành
-        - phù hợp ngành nào
-        - đề xuất theo tính cách
-        → Nếu KHÔNG liên quan → trả lời đúng duy nhất câu:
-            "Xin lỗi, hiện tại mình chưa có thông tin chính xác cho câu hỏi này. 
-            Bạn vui lòng liên hệ với chuyên viên tư vấn để biết thêm thông tin chi tiết"
+        Bạn là chatbot tư vấn tuyển sinh của trường đại học XYZ. Nhiệm vụ của bạn là tư vấn chọn ngành:
+        **CHỈ tư vấn chọn ngành khi câu hỏi của người dùng thật sự liên quan.**
+        
         Đây là đoạn hội thoại trước: 
             {chat_history}
         ===========================
@@ -717,12 +743,10 @@ class TrainingService:
         ===========================
         ### HƯỚNG DẪN XỬ LÝ
 
-        1. **Đầu tiên, hãy kiểm tra xem câu hỏi có thật sự liên quan đến việc tư vấn chọn ngành hay không, hay câu hỏi có liên quan đến thông tin hồ sơ người dùng hay không.**
-        - Nếu KHÔNG liên quan → trả lời đúng duy nhất câu:
-            "Hiện chưa có thông tin chính xác cho câu hỏi này. Bạn có thể nói rõ chi tiết hơn được không?"
-        - Không được viết khác, không được thêm diễn giải.
-        2. Nếu câu hỏi có liên quan đến tư vấn chọn ngành hay có liên quan đến thông tin hồ sơ người dùng mà hồ sơ người dùng trống thì hãy yêu cầu người dùng nhập những thông tin này để được tư vấn dựa vào thông tin hồ sơ người dùng.
-        3. Nếu thiếu dữ liệu học bạ hay thiếu dữ liệu RIASEC Result → ghi rõ trong reason: **"thiếu dữ liệu [__]"**
+        1. **Đầu tiên, hãy kiểm tra xem câu hỏi có thật sự liên quan đến việc tư vấn chọn ngành hay không, hoặc câu hỏi có liên quan đến thông tin hồ sơ người dùng hay không.**
+        - Nếu KHÔNG liên quan → bạn hãy tự tạo câu phản hồi phù hợp với CÂU HỎI NGƯỜI DÙNG
+        2. Nếu câu hỏi có liên quan đến thông tin hồ sơ người dùng ở trên bao gồm RIASEC Result và học bạ mà hồ sơ người dùng trống thì hãy yêu cầu người dùng nhập những thông tin này như RIASEC Result hoặc học bạ, 1 trong 2 là có thể được tư vấn dựa vào thông tin hồ sơ người dùng. Đề xuất theo tính cách có thể dựa vào kết quả RIASEC Result của THÔNG TIN HỒ SƠ NGƯỜI DÙNG
+        3. Nếu câu hỏi không liên quan thì hãy từ chối yêu cầu và đề nghị nhắn trực tiếp bên tuyển sinh
     
         """
             full_response = ""
@@ -732,7 +756,7 @@ class TrainingService:
                 await asyncio.sleep(0)  # Nhường event loop
 
             memory.save_context({"input": query}, {"output": full_response})  
-            print("Saved to memory. Current messages:", len(self.memory.chat_memory.messages))
+            print("Saved to memory. Current messages:", len(memory.chat_memory.messages))
 
             # === Lưu bot response vào DB ===
             bot_msg = ChatInteraction(

@@ -185,7 +185,7 @@ class RiasecResult(Base):
     score_enterprising = Column(Integer)
     score_conventional = Column(Integer)
     result = Column(String)
-    session_id = Column(String, unique=True)
+    # session_id = Column(String, unique=True)
     customer_id = Column(Integer, ForeignKey('CustomerProfile.customer_id'))
     
     # Relationships
@@ -233,7 +233,7 @@ class Major(Base):
     __tablename__ = 'Major'
     
     major_id = Column(Integer, primary_key=True, autoincrement=True)
-    major_name = Column("name",String, nullable=False)
+    major_name = Column(String, nullable=False)
     created_by = Column(Integer, ForeignKey('Users.user_id'), nullable=True)
     
     admission_forms = relationship('AdmissionForm', back_populates='major', cascade="all, delete-orphan")
