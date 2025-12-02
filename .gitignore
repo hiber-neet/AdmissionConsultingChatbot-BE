@@ -1,6 +1,7 @@
 node_modules
 .env
 .venv/
-
+__pycache__/
+*.pyc
 # Session change documentation (local development notes)
 SESSION_CHANGES_*.md
