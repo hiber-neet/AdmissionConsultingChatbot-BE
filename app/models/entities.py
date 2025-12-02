@@ -476,4 +476,3 @@ class Article(Base):
     author_user = relationship('Users', back_populates='articles')
     major = relationship('Major', back_populates='articles')
     specialization = relationship('Specialization', back_populates='articles')
-# ---------------------------------------------------------------------
