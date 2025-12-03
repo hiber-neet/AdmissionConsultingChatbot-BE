@@ -93,9 +93,21 @@ async def get_user_profile(
                 profile_data["content_manager_profile"] = {
                     "is_leader": user.content_manager_profile.is_leader
                 }
-                print("Content manager profile exists")
+                profile_data["content_manager_is_leader"] = user.content_manager_profile.is_leader
+                print(f"Content manager profile exists, is_leader: {user.content_manager_profile.is_leader}")
         except Exception as e:
             print(f"Error with content manager profile: {e}")
+            
+        try:
+            if hasattr(user, 'consultant_profile') and user.consultant_profile:
+                profile_data["consultant_profile"] = {
+                    "status": user.consultant_profile.status,
+                    "is_leader": user.consultant_profile.is_leader
+                }
+                profile_data["consultant_is_leader"] = user.consultant_profile.is_leader
+                print(f"Consultant profile exists, is_leader: {user.consultant_profile.is_leader}")
+        except Exception as e:
+            print(f"Error with consultant profile: {e}")
             
         try:
             if hasattr(user, 'admission_official_profile') and user.admission_official_profile:
