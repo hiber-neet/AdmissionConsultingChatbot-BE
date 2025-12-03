@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 import asyncio
 import json
+from app.models.database import SessionLocal
 from app.services import training_service
 from app.services.training_service import TrainingService
 
@@ -87,7 +88,7 @@ async def websocket_chat(websocket: WebSocket):
                 relevance_ok = await service.llm_relevance_check(enriched_query, q_text, a_text)
 
                 if relevance_ok:
-                    print("✅ floor 1: training QA valid")
+                    print("floor 1: training QA valid")
                     async for chunk in service.stream_response_from_qa(enriched_query, a_text, intent_id):
                         await websocket.send_text(json.dumps({
                             "event": "chunk",
@@ -100,7 +101,7 @@ async def websocket_chat(websocket: WebSocket):
                     })
                     continue
                 else:
-                    print("⚠️ QA not relevant → fallback xuống document")
+                    print("QA not relevant → fallback xuống document")
                     # Chạy document search lại
                     doc_results = service.search_documents(enriched_query, top_k=5)
                     result = {
@@ -116,14 +117,14 @@ async def websocket_chat(websocket: WebSocket):
             if tier_source == "document" or confidence < 0.75:
                 print("🔍 floor 3: using document context")
                 context_chunks = result["response"]
-                intend_id = result["intend_id"]
+                intent_id = result["intent_id"]
                 context = "\n\n".join([
                     r.payload.get("chunk_text", "") for r in context_chunks
                 ])
-                is_recommendation = await service.llm_recommendation_check(enriched_query, context)
-                if is_recommendation:
+                check = await service.llm_document_recommendation_check(enriched_query, context)
+                if check == "document":
                     async for chunk in service.stream_response_from_context(
-                        enriched_query, context, session_id, user_id, intend_id
+                        enriched_query, context, session_id, user_id, intent_id
                     ):
                         await websocket.send_text(json.dumps({
                             "event": "chunk",
@@ -140,12 +141,13 @@ async def websocket_chat(websocket: WebSocket):
                     except Exception:
                         print("Không thể gửi event done vì client đã ngắt.")
                         break
-                else: 
+                elif check == "recommendation": 
                     tier_source = "recommendation"
-
+                elif check == "nope":
+                    tier_source = "nope"
                 # === TIER 3: recommedation ===
             if tier_source == "recommendation":
-                print("🔍 floor 4: using recommendation layer")
+                print("floor 4: using recommendation layer")
                    
                 async for chunk in service.stream_response_from_recommendation(
                     user_id, session_id, enriched_query
@@ -166,21 +168,34 @@ async def websocket_chat(websocket: WebSocket):
                     print("Không thể gửi event done vì client đã ngắt.")
                     break
 
-
-            # 🧯 6️⃣ fallback cuối cùng
-            await websocket.send_json({
-                "event": "chunk",
-                "content": "Xin lỗi, hiện tại mình chưa có thông tin chính xác cho câu hỏi này. \
-Bạn vui lòng liên hệ với chuyên viên tư vấn để biết thêm thông tin chi tiết"
-            })
-            await websocket.send_json({
-                "event": "done",
-                "sources": [],
-                "confidence": 0.0
-            })
+            if tier_source == "nope":
+                db = SessionLocal()
+                try:
+                    service.update_faq_statistics(
+                        db,
+                        question_text=enriched_query,
+                        answer_text=None,
+                        intent_id=0  
+                    )
+                finally:
+                    db.close()
+                # 🧯 6️⃣ fallback cuối cùng
+                await websocket.send_json({
+                    "event": "chunk",
+                    "content": "Hiện tại mình chưa tìm thấy thông tin phù hợp với câu hỏi này trong hệ thống. "
+            "Bạn có thể đặt câu hỏi rõ hơn hoặc liên hệ trực tiếp chuyên viên tuyển sinh để được hỗ trợ chi tiết hơn nhé!"
+                })
+                await websocket.send_json({
+                    "event": "done",
+                    "sources": [],
+                    "confidence": 0.0
+                })
+                
+                
     except WebSocketDisconnect:
         # memory_manager.remove_memory(session_id)
         print("Client disconnected")
+                
 
     # Tạo 1 phiên chat session mới
     @router.post("/session/create")

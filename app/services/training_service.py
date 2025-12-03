@@ -68,7 +68,7 @@ class TrainingService:
         try:
             session = ChatSession(
                 session_type=session_type,
-                start_time=datetime.datetime.now()
+                start_time=datetime.now()
             )
             db.add(session)
             db.flush()
@@ -170,7 +170,7 @@ class TrainingService:
 
         Phản hồi mới nhất của người dùng: "{user_message}"
 
-        Nhiệm vụ: Dựa trên "cuộc hội thoại gần đây" và "phản hồi mới nhất của người dùng", bạn hãy đảm bảo tạo ra **một câu truy vấn tìm kiếm**, ngắn gọn, rõ ràng, cụ thể (bằng tiếng Việt), thể hiện đúng ý định của người dùng để gửi cho chatbot rag tư vấn để nó có thể hiểu yêu cầu của người dùng. "Chỉ tạo truy vấn nếu phản hồi của người dùng là phần tiếp nối hoặc làm rõ nội dung trong hội thoại trước đó.", nếu phản hồi của người dùng không trả lời hoặc không liên quan cho cuộc hội thoại gần đây thì hãy trả về chuỗi rỗng.
+        Nhiệm vụ: Dựa trên "cuộc hội thoại gần đây" và "phản hồi mới nhất của người dùng", bạn hãy đảm bảo tạo ra **một câu truy vấn tìm kiếm**, rõ ràng, cụ thể (bằng tiếng Việt), thể hiện đúng ý định của người dùng để gửi cho chatbot rag tư vấn để nó có thể hiểu yêu cầu của người dùng. "Chỉ tạo truy vấn nếu phản hồi của người dùng là phần tiếp nối hoặc làm rõ nội dung trong hội thoại trước đó.", nếu phản hồi của người dùng không trả lời hoặc không liên quan cho cuộc hội thoại gần đây thì hãy trả về y nguyên phản hồi mới nhất của người dùng.
 
         Chỉ trả về **một dòng truy vấn duy nhất** (không thêm nội dung khác).  
         Ví dụ:
@@ -195,6 +195,7 @@ class TrainingService:
         Câu trả lời chính thức: "{answer}"
 
         Hãy trả lời duy nhất chỉ một từ: "true" nếu câu hỏi DB phù hợp và trả lời đó hợp lý cho truy vấn tìm kiếm; "false" nếu chỉ trùng từ khóa hoặc không phù hợp.
+        Hoặc có thể trả về "true" nếu câu hỏi tìm kiếm chỉ là lời chào.
         """
         res = await self.llm.ainvoke(prompt)
         if not res:
@@ -202,19 +203,28 @@ class TrainingService:
         r = res.strip().lower()
         return ("đúng" in r) or ("true" in r) or (r.startswith("đúng")) or (r.startswith("true"))
 
-    async def llm_recommendation_check(self, enriched_query: str, context: str) -> bool:
+    async def llm_document_recommendation_check(self, enriched_query: str, context: str) -> bool:
         prompt = f"""
-        Bạn là hệ thống kiểm tra mức độ liên quan giữa câu hỏi người dùng và nội dung trong Document Base (RAG) cho chatbot RAG tư vấn tuyển sinh.
-
-        Yêu cầu:
-        - Chỉ trả về "true" nếu NỘI DUNG của document base THỰC SỰ có thông tin trả lời câu hỏi.
-        - Trả về "false" nếu:
+        Bạn là hệ thống kiểm tra 2 tầng:
+        - Tầng 1 là hệ thống kiểm tra mức độ liên quan giữa câu hỏi người dùng và nội dung trong Document Base (RAG) cho chatbot RAG tư vấn tuyển sinh.
+        - Tầng 2 là hệ thống kiểm tra mức độ liên quan giữa câu hỏi người dùng có liên quan đến các nội dung tư vấn ngành học hay tư vấn cho cá nhân dựa theo hồ sơ của học sinh hoặc những câu liên quan đến RIASEC, học bạ, GPA, sở thích, nguyện vọng cá nhân; hoặc yêu cầu so sánh ngành theo profile; hoặc yêu cầu gợi ý ngành phù hợp cho chatbot RAG tư vấn tuyển sinh.
+        Yêu cầu kiểm tra câu hỏi người dùng có phù hợp với tầng 1 hoặc tầng 2:
+        - Nếu phù hợp với tầng 1 thì trả về duy nhất 1 từ "document"
+        - Nếu phù hợp với tầng 2 thì trả về duy nhất 1 từ "recommendation"
+        - Nếu tầng 1 phù hợp thì không cần check đến tầng 2
+        - Nếu không phù hợp với tầng 1 và tầng 2 thì trả về duy nhất 1 từ "Nope"
+        - Check tầng 1(document) đầu tiên:
+        - Chỉ trả về "document" nếu NỘI DUNG của document base THỰC SỰ có thông tin trả lời câu hỏi hoặc câu hỏi người dùng chỉ là những lời chào.
+        - Check qua tầng 2 nếu:
             • chỉ trùng từ khóa nhưng không cùng ý nghĩa
             • document không chứa dữ liệu cần thiết để trả lời
             • truy vấn là yêu cầu tư vấn cá nhân (Recommendation), không phải tìm kiến thức
             • query chung chung như: "tôi hợp ngành nào", "hãy tư vấn", "mô tả về tôi", "nên học gì"
             • context không cung cấp thông tin trực tiếp liên quan
-
+        - Check tầng 2(recommendation):
+        - Chỉ trả về "recommendation" nếu câu hỏi người dùng liên quan đến các nội dung tư vấn ngành học hay tư vấn cho cá nhân dựa theo hồ sơ của học sinh hoặc những câu liên quan đến RIASEC, học bạ, GPA, sở thích, nguyện vọng cá nhân; hoặc yêu cầu so sánh ngành theo profile; hoặc yêu cầu gợi ý ngành phù hợp
+        - Chỉ trả về "Nope" khi cả tầng 1 và tầng 2 đều không liên quan đến câu hỏi người dùng.
+        
         Câu hỏi người dùng: "{enriched_query}"
 
         Nội dung Document Base (context):
@@ -222,9 +232,29 @@ class TrainingService:
         {context}
         \"\"\"
 
+        
+        """
+
+        res = await self.llm.ainvoke(prompt)
+        r = res.strip().lower()
+        if r not in ["document", "recommendation", "nope"]:
+            r = "nope"
+        return r
+
+    async def llm_suitable_for_recommedation_check(self, enriched_query: str, context: str) -> bool:
+        prompt = f"""
+        Bạn là hệ thống kiểm tra mức độ liên quan giữa câu hỏi người dùng có liên quan đến các nội dung tư vấn ngành học hay tư vấn cho cá nhân dựa theo hồ sơ của học sinh hoặc những câu liên quan đến RIASEC, học bạ, GPA, sở thích, nguyện vọng cá nhân; hoặc yêu cầu so sánh ngành theo profile; hoặc yêu cầu gợi ý ngành phù hợp cho chatbot RAG tư vấn tuyển sinh.
+
+        Yêu cầu:
+        - Chỉ trả về "true" nếu câu hỏi có liên quan đến các nội dung đó.
+        - Trả về "false" nếu câu hỏi không liên quan đến các nội dung đó.
+
+        Câu hỏi người dùng: "{enriched_query}"
+
+        
         Hãy TRẢ LỜI DUY NHẤT:
-        - "true" → nếu document có thể trả lời chính xác câu này  
-        - "false" → nếu document KHÔNG PHÙ HỢP
+        - "true" → nếu câu hỏi có liên quan đến các nội dung đó 
+        - "false" → nếu câu hỏi không liên quan đến các nội dung đó
         """
 
         res = await self.llm.ainvoke(prompt)
@@ -232,7 +262,6 @@ class TrainingService:
             return False
         r = res.strip().lower()
         return ("đúng" in r) or ("true" in r) or (r.startswith("đúng")) or (r.startswith("true"))
-
 
     async def load_session_history_to_memory(self, session_id: int, db: Session):
         memory = memory_service.get_memory(session_id)
@@ -262,7 +291,7 @@ class TrainingService:
         if last_user_msg:
             memory.save_context({"input": last_user_msg}, {"output": ""})
 
-    def update_faq_statistics(db: Session, question_text: str, answer_text: str, intent_id: int):
+    def update_faq_statistics(self, db: Session, question_text: str, answer_text: str, intent_id: int = 1):
         """
         Tăng usage_count cho một Q&A đã dùng (Tier 1).
         - Tạo mới nếu chưa có.
@@ -330,7 +359,7 @@ class TrainingService:
             - Bạn là chatbot tư vấn tuyển sinh của trường xyz, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
             - Nếu không tìm thấy thông tin, hãy nói rõ và gợi ý liên hệ trực tiếp nhân viên tư vấn
             - Không bịa thêm thông tin ngoài context
-            - Nếu câu hỏi chỉ là chào hỏi, hỏi thời tiết, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
+            - Nếu câu hỏi chỉ là chào hỏi, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
             - Có thể **diễn đạt lại câu hỏi hoặc thông tin** một cách nhẹ nhàng, tự nhiên để người dùng dễ hiểu hơn, **nhưng tuyệt đối không thay đổi ý nghĩa hay thêm dữ kiện mới.**
             - Khi có thể, hãy **giải thích thêm bối cảnh hoặc gợi ý bước tiếp theo**, ví dụ:  
                 “Bạn muốn mình gửi danh sách ngành đào tạo kèm chuyên ngành chi tiết không?”  
@@ -416,7 +445,7 @@ class TrainingService:
                 await asyncio.sleep(0)  # Nhường event loop
 
             memory.save_context({"input": query}, {"output": full_response})  
-            print("Saved to memory. Current messages:", len(self.memory.chat_memory.messages))
+            print("Saved to memory. Current messages:", len(memory.chat_memory.messages))
 
             # === Lưu bot response vào DB ===
             bot_msg = ChatInteraction(
