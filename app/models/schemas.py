@@ -30,6 +30,9 @@ class UserProfileResponse(BaseModel):
     consultant_profile: Optional[dict] = None
     content_manager_profile: Optional[dict] = None
     admission_official_profile: Optional[dict] = None
+    # Add explicit leadership flags for frontend
+    consultant_is_leader: Optional[bool] = False
+    content_manager_is_leader: Optional[bool] = False
 
     class Config:
         orm_mode = True
