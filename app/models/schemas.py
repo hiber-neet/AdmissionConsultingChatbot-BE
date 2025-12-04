@@ -136,8 +136,14 @@ class InterestResponse(InterestBase):
 
 # ================= ACADEMIC SCORE =================
 class AcademicScoreBase(BaseModel):
-    subject_name: str
-    score: float
+    math: float
+    literature: float
+    english: float
+    physics: float
+    chemistry: float
+    biology: float
+    history: float
+    geography: float
 
 
 class AcademicScoreCreate(AcademicScoreBase):
@@ -147,7 +153,7 @@ class AcademicScoreCreate(AcademicScoreBase):
 class AcademicScoreResponse(AcademicScoreBase):
     score_id: int
     customer_id: int
-
+    
     class Config:
         orm_mode = True
 
@@ -454,7 +460,6 @@ class RiasecResultBase(BaseModel):
     score_enterprising: int
     score_conventional: int
     result: str
-    session_id: str
 
 class RiasecResultCreate(RiasecResultBase):
     pass

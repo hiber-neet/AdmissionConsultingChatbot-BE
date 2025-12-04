@@ -137,8 +137,15 @@ class AcademicScore(Base):
     __tablename__ = 'AcademicScore'
     
     score_id = Column(Integer, primary_key=True, autoincrement=True)
-    subject_name = Column(String, nullable=False)
-    score = Column(Float)
+    math = Column(Float)
+    literature = Column(Float)
+    english = Column(Float)
+    physics = Column(Float)
+    chemistry = Column(Float)
+    biology = Column(Float)
+    history = Column(Float)
+    geography = Column(Float)
+
     customer_id = Column(Integer, ForeignKey('CustomerProfile.customer_id'))
     
     # Relationships

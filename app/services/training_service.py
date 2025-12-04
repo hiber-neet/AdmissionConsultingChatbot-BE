@@ -9,6 +9,7 @@ import os
 import uuid
 import asyncio
 from sqlalchemy.orm import Session
+from app.models import schemas
 from app.models.entities import AcademicScore, ChatInteraction, ChatSession, FaqStatistics, Major, ParticipateChatSession, RiasecResult, TrainingQuestionAnswer
 from app.models.database import SessionLocal
 from sqlalchemy.exc import SQLAlchemyError
@@ -262,6 +263,36 @@ class TrainingService:
             return False
         r = res.strip().lower()
         return ("đúng" in r) or ("true" in r) or (r.startswith("đúng")) or (r.startswith("true"))
+
+    async def response_from_riasec_result(self, riasec_result: schemas.RiasecResultCreate):
+        prompt = f"""
+        Bạn là chuyên gia hướng nghiệp Holland (RIASEC).
+
+        Dưới đây là điểm RIASEC của người dùng:
+        - Realistic (R): {riasec_result.score_realistic}
+        - Investigative (I): {riasec_result.score_investigative}
+        - Artistic (A): {riasec_result.score_artistic}
+        - Social (S): {riasec_result.score_social}
+        - Enterprising (E): {riasec_result.score_enterprising}
+        - Conventional (C): {riasec_result.score_conventional}
+
+        Yêu cầu:
+        1. Tự xác định mã RIASEC chính của người dùng bằng cách chọn 3 nhóm có điểm cao nhất (ví dụ: “ISA”, “REI”, “SEC”…).
+        2. Giải thích ý nghĩa mã RIASEC đó theo phong cách hướng nghiệp.
+        3. Tóm tắt đặc điểm tính cách chính (3–5 câu).
+        4. Viết súc tích, dễ hiểu, không dùng markdown và chỉ trả về duy nhất một đoạn văn.
+
+        Trả về:
+        - Một đoạn văn hoàn chỉnh, bao gồm cả mã RIASEC mà bạn suy luận.
+            """
+
+        try:
+            res = await self.llm.ainvoke(prompt)
+            return res.strip()
+
+        except Exception as e:
+            print("LLM error:", e)
+            return "Xin lỗi, hệ thống tạm thời chưa thể phân tích kết quả RIASEC. Bạn vui lòng thử lại sau."
 
     async def load_session_history_to_memory(self, session_id: int, db: Session):
         memory = memory_service.get_memory(session_id)
@@ -803,17 +834,27 @@ class TrainingService:
             out["personality_summary"] = ri.result or self._riasec_to_summary(out["riasec"])
 
         # --- Academic scores ---
-        scores = (
+        score = (
             db.query(AcademicScore)
             .filter(AcademicScore.customer_id == user_id)
-            .all()
+            .first()
         )
 
-        if scores:
-            subj_map = {s.subject_name: s.score for s in scores}
+        if score:
+            subj_map = {
+            "math": score.math,
+            "literature": score.literature,
+            "english": score.english,
+            "physics": score.physics,
+            "chemistry": score.chemistry,
+            "biology": score.biology,
+            "history": score.history,
+            "geography": score.geography,
+        }
 
             # simple GPA = average score
-            gpa = round(sum([s.score for s in scores]) / len(scores), 2)
+            valid_scores = [v for v in subj_map.values() if v is not None]
+            gpa = round(sum(valid_scores) / len(valid_scores), 2)
 
             out["subjects"] = subj_map
             out["gpa"] = gpa
@@ -821,7 +862,7 @@ class TrainingService:
                 f"GPA xấp xỉ {gpa}. Các môn: " +
                 ", ".join([f"{k}: {v}" for k, v in subj_map.items()])
             )
-
+            print(out["academic_summary"])
         return out
 
     def _riasec_to_summary(self, ri_map: Dict[str,int]) -> str:
@@ -832,8 +873,7 @@ class TrainingService:
 
     def _get_all_majors_from_db(self, db: Session, limit: int = 200) -> List[Dict[str,Any]]:
         """
-        Lấy danh sách majors (id, name, short_description, requirements)
-        Giả sử bạn có model Major với fields: major_id, name, description, requirements
+        Lấy danh sách majors
         """
         rows = db.query(Major).order_by(Major.major_name).limit(limit).all()
         majors = []
