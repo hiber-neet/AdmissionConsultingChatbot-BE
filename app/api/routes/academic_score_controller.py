@@ -14,8 +14,28 @@ def upload_academic_score(
     if not current_user.customer_profile:
         raise HTTPException(status_code=403, detail="User is not a customer")
         
-    db_academic_score = entities.AcademicScore(**academic_score.dict(), customer_id=current_user.user_id)
+    db_academic_score = entities.AcademicScore(academic_score.model_dump(), customer_id=current_user.user_id)
     db.add(db_academic_score)
     db.commit()
     db.refresh(db_academic_score)
     return db_academic_score
+
+@router.get("/users/{user_id}/academic-scores", 
+            response_model=schemas.AcademicScoreResponse)
+def get_academic_scores(
+    user_id: int,
+    db: Session = Depends(database.get_db)
+):
+    # Lấy profile KH (vì bảng academic_score dùng customer_id)
+    customer = db.query(entities.CustomerProfile).filter(
+        entities.CustomerProfile.customer_id == user_id
+    ).first()
+
+    if not customer:
+        raise HTTPException(status_code=404, detail="Học sinh không tồn tại")
+
+    scores = db.query(entities.AcademicScore).filter(
+        entities.AcademicScore.customer_id == user_id
+    ).first()
+
+    return scores

@@ -4,80 +4,74 @@ from app.models import schemas, database, entities
 from app.core.security import get_current_user
 from typing import Optional
 
+from app.services.training_service import TrainingService
+
 router = APIRouter()
 
-@router.post("/submit", response_model=schemas.RiasecResult)
-def submit_riasec(
+@router.post("/submit")
+async def submit_riasec(
     riasec_result: schemas.RiasecResultCreate,
     db: Session = Depends(database.get_db),
-    current_user: Optional[entities.Users] = Depends(get_current_user)
+    current_user: Optional[entities.Users] = Depends(get_current_user),
+   
 ):
-    user_id = current_user.user_id if current_user else None
+    """
+    Logic đơn giản:
+    - Luôn tạo summary bằng LLM.
+    - Nếu có user đăng nhập → lưu vào DB.
+    - Nếu không → chỉ trả summary (không lưu DB).
+    """
+    service = TrainingService()
+    # 1) Gọi LLM để tạo summary RIASEC
+    summary_text = await service.response_from_riasec_result(riasec_result)
 
-    # --- SỬA LẠI LOGIC TẠI ĐÂY ---
+    # Nếu user chưa login → trả summary, không lưu gì
+    if current_user is None:
+        return {
+            "summary": summary_text,
+            "scores": riasec_result
+        }
 
-    # 1. Luôn tìm bản ghi theo Session ID hiện tại TRƯỚC (Bất kể đã login hay chưa)
-    # Đây là bài test đang hiện trên màn hình của user
-    current_session_result = db.query(entities.RiasecResult).filter(
-        entities.RiasecResult.session_id == riasec_result.session_id
-    ).first()
-
-    target_result = None
-
-    if current_session_result:
-        # CASE A: Tìm thấy bài của Session này (Chính là bài Guest vừa làm)
-        target_result = current_session_result
-        
-        # Nếu đang login, thực hiện "Claim" (Chiếm quyền) bài này
-        if user_id:
-            # Gán user id vào bài này
-            target_result.customer_id = user_id
-            
-            # (Optional) Dọn dẹp: Nếu user này lỡ có bài cũ rích nào đó khác (gây thừa thãi)
-            # thì xóa bài cũ đi.
-            old_result = db.query(entities.RiasecResult).filter(
-                entities.RiasecResult.customer_id == user_id,
-                entities.RiasecResult.result_id != target_result.result_id
-            ).first()
-            if old_result:
-                db.delete(old_result) # Xóa bài cũ để tránh duplicate logic sau này
-
-    elif user_id:
-        # CASE B: Session mới tinh, nhưng User đã login và có thể có bài cũ
-        # Tìm bài cũ của user để update
-        user_old_result = db.query(entities.RiasecResult).filter(
-            entities.RiasecResult.customer_id == user_id
-        ).first()
-        
-        if user_old_result:
-            target_result = user_old_result
-            # Cập nhật session id mới cho bài cũ
-            target_result.session_id = riasec_result.session_id
-    
-    # --- THỰC HIỆN UPDATE HOẶC CREATE ---
-    
-    if target_result:
-        # Update: Cập nhật điểm số
-        # Exclude session_id để tránh việc tự gán lại chính nó (dù không lỗi nhưng thừa)
-        update_data = riasec_result.dict(exclude={'session_id'}) 
-        for key, value in update_data.items():
-            setattr(target_result, key, value)
-            
-        # Đảm bảo session_id đúng (cho trường hợp Case B)
-        if target_result.session_id != riasec_result.session_id:
-             target_result.session_id = riasec_result.session_id
-    else:
-        # Create: Chưa có gì cả -> Tạo mới
-        target_result = entities.RiasecResult(
-            **riasec_result.dict(),
-            customer_id=user_id
-        )
-        db.add(target_result)
-
+    # 2) User có login → lưu vào DB
     try:
+        new_result = entities.RiasecResult(
+            score_realistic=riasec_result.score_realistic,
+            score_investigative=riasec_result.score_investigative,
+            score_artistic=riasec_result.score_artistic,
+            score_social=riasec_result.score_social,
+            score_enterprising=riasec_result.score_enterprising,
+            score_conventional=riasec_result.score_conventional,
+            result=summary_text,
+            customer_id=current_user.user_id
+        )
+
+        db.add(new_result)
         db.commit()
-        db.refresh(target_result)
-        return target_result
+        db.refresh(new_result)
+
+        return new_result
+
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=f"Lỗi lưu kết quả: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Lỗi khi lưu kết quả: {str(e)}")
+    
+
+@router.get(
+    "/users/{user_id}/riasec/results",
+    response_model=list[schemas.RiasecResultBase]
+)
+def get_riasec_results(
+    user_id: int, 
+    db: Session = Depends(database.get_db)
+):
+    results = (
+        db.query(entities.RiasecResult)
+        .filter(entities.RiasecResult.user_id == user_id)
+        .order_by(entities.RiasecResult.created_at.desc())
+        .all()
+    )
+
+    if not results:
+        return []  # Trả về mảng rỗng thay vì message
+
+    return results
