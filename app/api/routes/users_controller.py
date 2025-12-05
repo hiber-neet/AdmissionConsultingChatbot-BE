@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from app.models.database import get_db
 from app.models.schemas import (
     PermissionChangeRequest,
@@ -41,8 +41,39 @@ def get_staffs(db: Session = Depends(get_db), current_user: Users = Depends(get_
             detail="Admin permission required",
         )
 
-    staffs = db.query(Users).filter(Users.permissions.any(), Users.user_id != current_user.user_id).all()
-    return staffs
+    # Query users with permissions loaded and profile relationships
+    staffs = db.query(Users).options(
+        selectinload(Users.permissions),
+        selectinload(Users.consultant_profile),
+        selectinload(Users.content_manager_profile), 
+        selectinload(Users.admission_official_profile),
+        selectinload(Users.role)
+    ).filter(
+        Users.permissions.any(), 
+        Users.user_id != current_user.user_id
+    ).all()
+    
+    # Format the response to include permission names and profile indicators
+    result = []
+    for user in staffs:
+        user_data = {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "status": user.status,
+            "role_id": user.role_id,
+            "password": user.password,  # Include for compatibility with existing frontend
+            "permissions": [{"permission_name": p.permission_name, "permission_id": p.permission_id} for p in user.permissions],
+            "consultant_is_leader": user.consultant_profile.is_leader if user.consultant_profile else False,
+            "content_manager_is_leader": user.content_manager_profile.is_leader if user.content_manager_profile else False,
+            "consultant_profile": bool(user.consultant_profile),
+            "content_manager_profile": bool(user.content_manager_profile),
+            "admission_official_profile": bool(user.admission_official_profile),
+        }
+        result.append(user_data)
+    
+    return result
 
 
 @router.post("/permissions/grant")
