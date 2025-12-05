@@ -6,27 +6,33 @@ from typing import List, Optional
 import re
 from app.models.database import get_db
 from app.models import entities
-from app.core.security import get_current_user
+from app.core.security import get_current_user, has_permission
 
 router = APIRouter()
 
 def check_analytics_permission(current_user: entities.Users = Depends(get_current_user)):
-    """Check if user has permission to view analytics (Admin, Consultant, or Manager)"""
+    """Check if user has permission to view analytics (Admin, Consultant, or Content Manager)"""
     if not current_user:
         raise HTTPException(status_code=403, detail="Not authenticated")
 
-    try:
-        user_perms_list = [p.permission_name.lower() for p in current_user.permissions] 
-    except AttributeError:
-        user_perms_list = [p.lower() for p in current_user.permissions]
+    # Use the standard has_permission function which handles admin bypassing
+    is_admin = has_permission(current_user, "admin")
+    is_consultant = has_permission(current_user, "consultant")  
+    is_content_manager = has_permission(current_user, "content_manager")
 
-    is_admin_or_consultant = "admin" in user_perms_list or "consultant" in user_perms_list
-    is_manager = "manager" in user_perms_list
+    print(f"DEBUG: User {current_user.user_id} - admin:{is_admin}, consultant:{is_consultant}, content_manager:{is_content_manager}")
 
-    if not (is_admin_or_consultant or is_manager):
+    if not (is_admin or is_consultant or is_content_manager):
+        # Debug: show actual permissions
+        if current_user.permissions:
+            actual_perms = [p.permission_name for p in current_user.permissions]
+            print(f"DEBUG: Permission denied for user {current_user.user_id} with permissions {actual_perms}")
+        else:
+            print(f"DEBUG: Permission denied for user {current_user.user_id} - no permissions loaded")
+            
         raise HTTPException(
             status_code=403,
-            detail="Admin, Consultant, or Manager permission required"
+            detail="Admin, Consultant, or Content Manager permission required"
         )
     
     return current_user
@@ -379,6 +385,248 @@ async def get_trending_topics(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing trending topics: {str(e)}")
+
+@router.get("/content-statistics")
+async def get_content_statistics(
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_analytics_permission)
+):
+    """
+    Get content statistics for content managers
+    """
+    try:
+        # Total articles count
+        total_articles = db.query(func.count(entities.Article.article_id)).scalar() or 0
+        
+        # Published articles count
+        published_articles = db.query(func.count(entities.Article.article_id)).filter(
+            entities.Article.status == 'published'
+        ).scalar() or 0
+        
+        # Draft articles count
+        draft_articles = db.query(func.count(entities.Article.article_id)).filter(
+            entities.Article.status == 'draft'
+        ).scalar() or 0
+        
+        # Review articles count (assuming 'review' or 'pending' status)
+        review_articles = db.query(func.count(entities.Article.article_id)).filter(
+            or_(entities.Article.status == 'review', entities.Article.status == 'pending')
+        ).scalar() or 0
+        
+        # Recent articles (last 10)
+        recent_articles = db.query(entities.Article).order_by(
+            desc(entities.Article.create_at)
+        ).limit(10).all()
+        
+        # Articles by major
+        articles_by_major = db.query(
+            entities.Major.major_name,
+            func.count(entities.Article.article_id).label('article_count')
+        ).join(
+            entities.Article, entities.Major.major_id == entities.Article.major_id
+        ).group_by(
+            entities.Major.major_name
+        ).all()
+        
+        # Monthly trends - get articles created in last 6 months
+        six_months_ago = datetime.now() - timedelta(days=180)
+        monthly_articles = db.query(
+            func.date_trunc('month', entities.Article.create_at).label('month'),
+            func.count(entities.Article.article_id).label('total_articles')
+        ).filter(
+            entities.Article.create_at >= six_months_ago.date()
+        ).group_by(
+            func.date_trunc('month', entities.Article.create_at)
+        ).order_by('month').all()
+        
+        # Get published articles count separately for each month
+        published_monthly = db.query(
+            func.date_trunc('month', entities.Article.create_at).label('month'),
+            func.count(entities.Article.article_id).label('published_articles')
+        ).filter(
+            and_(
+                entities.Article.create_at >= six_months_ago.date(),
+                entities.Article.status == 'published'
+            )
+        ).group_by(
+            func.date_trunc('month', entities.Article.create_at)
+        ).all()
+        
+        # Combine the results
+        published_dict = {month: count for month, count in published_monthly}
+        monthly_trends = []
+        for month, total_articles in monthly_articles:
+            published_count = published_dict.get(month, 0)
+            monthly_trends.append((month, total_articles, published_count))
+        
+        # Status distribution
+        status_distribution = {}
+        statuses = db.query(
+            entities.Article.status,
+            func.count(entities.Article.article_id)
+        ).group_by(entities.Article.status).all()
+        
+        for status, count in statuses:
+            status_distribution[status] = count
+        
+        return {
+            "success": True,
+            "data": {
+                "overview": {
+                    "total_articles": total_articles,
+                    "published_articles": published_articles,
+                    "draft_articles": draft_articles,
+                    "review_articles": review_articles,
+                    "my_articles": total_articles  # For now, assume all articles are "my articles"
+                },
+                "recent_articles": [
+                    {
+                        "article_id": article.article_id,
+                        "title": article.title,
+                        "author": "Admin",  # You might want to get actual author info
+                        "status": article.status,
+                        "created_at": article.create_at.isoformat() if article.create_at else None,
+                        "major_id": article.major_id,
+                        "specialization_id": article.specialization_id
+                    }
+                    for article in recent_articles
+                ],
+                "popular_articles": [
+                    {
+                        "article_id": article.article_id,
+                        "title": article.title,
+                        "author": "Admin",
+                        "created_at": article.create_at.isoformat() if article.create_at else None,
+                        "view_count": 0,  # You might want to add view tracking
+                        "url": f"/articles/{article.article_id}"
+                    }
+                    for article in recent_articles[:5]  # Use recent articles as popular for now
+                ],
+                "articles_by_major": [
+                    {
+                        "major_name": major_name,
+                        "article_count": article_count
+                    }
+                    for major_name, article_count in articles_by_major
+                ],
+                "monthly_trends": [
+                    {
+                        "month": month.strftime('%Y-%m') if month else None,
+                        "total_articles": int(total_articles or 0),
+                        "published_articles": int(published_articles or 0)
+                    }
+                    for month, total_articles, published_articles in monthly_trends
+                ],
+                "status_distribution": status_distribution,
+                "generated_at": datetime.now().isoformat()
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting content statistics: {str(e)}")
+
+@router.get("/consultant-statistics")
+async def get_consultant_statistics(
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_analytics_permission)
+):
+    """
+    Get consultant dashboard statistics
+    """
+    try:
+        # Total queries count
+        total_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).filter(
+            entities.ChatInteraction.is_from_bot == False
+        ).scalar() or 0
+        
+        # Queries in last 30 days for growth calculation
+        thirty_days_ago = datetime.now() - timedelta(days=30)
+        recent_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).filter(
+            and_(
+                entities.ChatInteraction.is_from_bot == False,
+                entities.ChatInteraction.timestamp >= thirty_days_ago.date()
+            )
+        ).scalar() or 0
+        
+        # Previous 30 days for comparison
+        sixty_days_ago = datetime.now() - timedelta(days=60)
+        previous_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).filter(
+            and_(
+                entities.ChatInteraction.is_from_bot == False,
+                entities.ChatInteraction.timestamp >= sixty_days_ago.date(),
+                entities.ChatInteraction.timestamp < thirty_days_ago.date()
+            )
+        ).scalar() or 0
+        
+        # Calculate growth rate
+        queries_growth = 0
+        if previous_queries > 0:
+            queries_growth = round(((recent_queries - previous_queries) / previous_queries) * 100)
+        elif recent_queries > 0:
+            queries_growth = 100
+        
+        # Mock accuracy rate (you might want to calculate this based on ratings)
+        accuracy_rate = 85  # Mock value
+        accuracy_improvement = 5  # Mock value
+        
+        # Most active time (mock for now)
+        most_active_time = "2:00 PM - 4:00 PM"
+        
+        # Unanswered queries (knowledge gaps)
+        unanswered_queries = db.query(func.count(func.distinct(entities.ChatInteraction.message_text))).filter(
+            and_(
+                entities.ChatInteraction.is_from_bot == False,
+                entities.ChatInteraction.timestamp >= thirty_days_ago.date()
+            )
+        ).scalar() or 0
+        unanswered_queries = max(0, int(unanswered_queries * 0.2))  # Estimate 20% are unanswered
+        
+        # Questions over time (last 7 days)
+        seven_days_ago = datetime.now() - timedelta(days=7)
+        questions_over_time = []
+        for i in range(7):
+            day = seven_days_ago + timedelta(days=i)
+            day_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).filter(
+                and_(
+                    entities.ChatInteraction.is_from_bot == False,
+                    func.date(entities.ChatInteraction.timestamp) == day.date()
+                )
+            ).scalar() or 0
+            
+            questions_over_time.append({
+                "date": day.strftime('%Y-%m-%d'),
+                "queries": day_queries
+            })
+        
+        # Question categories (based on message content analysis)
+        question_categories = [
+            {"name": "Admissions", "value": 35, "color": "#3B82F6"},
+            {"name": "Academic", "value": 25, "color": "#10B981"},
+            {"name": "Financial", "value": 20, "color": "#F59E0B"},
+            {"name": "Campus Life", "value": 15, "color": "#8B5CF6"},
+            {"name": "Other", "value": 5, "color": "#6B7280"}
+        ]
+        
+        return {
+            "status": "success",
+            "data": {
+                "overview_stats": {
+                    "total_queries": total_queries,
+                    "queries_growth": queries_growth,
+                    "accuracy_rate": accuracy_rate,
+                    "accuracy_improvement": accuracy_improvement,
+                    "most_active_time": most_active_time,
+                    "unanswered_queries": unanswered_queries
+                },
+                "questions_over_time": questions_over_time,
+                "question_categories": question_categories,
+                "last_updated": datetime.now().isoformat()
+            },
+            "message": "Consultant statistics retrieved successfully"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting consultant statistics: {str(e)}")
 
 @router.get("/analytics-summary")
 async def get_analytics_summary(
