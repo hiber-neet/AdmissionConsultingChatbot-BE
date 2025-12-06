@@ -56,6 +56,8 @@ async def create_article(
         title=article.title,
         description=article.description,
         url=article.url,
+        link_image=article.link_image,
+        note=article.note,
         status="draft",
         create_at=datetime.now(),
         created_by=current_user.user_id,
@@ -68,6 +70,82 @@ async def create_article(
     db.refresh(new_article)
 
     return new_article
+
+@router.put("/{article_id}", response_model=ArticleResponse)
+async def update_article(
+    article_id: int,
+    article_update: ArticleUpdate,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user)
+):
+    """
+    Update article content.
+    - Admin/Content Manager Leader: can edit any article
+    - Content Manager: can only edit their own articles
+    """
+    if not current_user or not verify_content_manager(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only content managers can update articles"
+        )
+
+    # Get the article
+    article = db.query(Article).filter(Article.article_id == article_id).first()
+    if not article:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Article with id {article_id} not found"
+        )
+
+    # Check permissions: Admin/Leader can edit any, regular CM can only edit their own
+    is_admin_user = is_admin(current_user)
+    is_leader = verify_content_manager_leader(current_user)
+    
+    if not (is_admin_user or is_leader) and article.created_by != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only edit your own articles"
+        )
+
+    # Validate major and specialization if provided
+    if article_update.major_id is not None:
+        major = db.query(Major).filter(Major.major_id == article_update.major_id).first()
+        if not major:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Major with id {article_update.major_id} not found"
+            )
+
+    if article_update.specialization_id is not None:
+        spec = db.query(Specialization).filter(
+            Specialization.specialization_id == article_update.specialization_id
+        ).first()
+        if not spec:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Specialization with id {article_update.specialization_id} not found"
+            )
+
+    # Update fields if provided
+    if article_update.title is not None:
+        article.title = article_update.title
+    if article_update.description is not None:
+        article.description = article_update.description
+    if article_update.url is not None:
+        article.url = article_update.url
+    if article_update.link_image is not None:
+        article.link_image = article_update.link_image
+    if article_update.note is not None:
+        article.note = article_update.note
+    if article_update.major_id is not None:
+        article.major_id = article_update.major_id
+    if article_update.specialization_id is not None:
+        article.specialization_id = article_update.specialization_id
+
+    db.commit()
+    db.refresh(article)
+
+    return article
 
 @router.put("/{article_id}/status", response_model=ArticleResponse)
 async def update_article_status(
@@ -107,13 +185,14 @@ async def get_articles(
 ):
     """
     Get articles based on user permissions:
-    - Admin: can see all articles (any status)
-    - Content manager: can see their own articles (any status) + all published articles
+    - Admin: can see all articles (any status except deleted)
+    - Content manager: can see their own articles (any status except deleted) + all published articles
     - Other users: can only see published articles
     """
     # Base query with joins for additional information
     query = (
         db.query(Article)
+        .filter(Article.status != "deleted")  # Exclude deleted articles for all users
         .outerjoin(Major)
         .outerjoin(Specialization)
         .outerjoin(Users, Users.user_id == Article.created_by)
@@ -124,7 +203,7 @@ async def get_articles(
         # Not authenticated: only published articles
         query = query.filter(Article.status == "published")
     elif is_admin(current_user):
-        # Admin: can see all articles (no filter)
+        # Admin: can see all articles (already filtered deleted above)
         pass
     elif (
         has_permission(current_user, "content_manager")
@@ -138,7 +217,7 @@ async def get_articles(
             )
         )
     ):
-        # Content manager: can see all articles (no filter)
+        # Content manager: can see all articles (already filtered deleted above)
         pass
     else:
         # Other users: only published articles
@@ -302,6 +381,55 @@ async def get_article(
         note=article.note if article.note else None
     )
 
+@router.delete("/{article_id}", response_model=ArticleResponse)
+async def delete_article(
+    article_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user)
+):
+    """
+    Soft delete an article by changing its status to 'deleted'.
+    - Admin/Content Manager Leader: can delete any article
+    - Content Manager: can only delete their own articles
+    """
+    if not current_user or not verify_content_manager(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only content managers can delete articles"
+        )
+
+    # Get the article
+    article = db.query(Article).filter(Article.article_id == article_id).first()
+    if not article:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Article with id {article_id} not found"
+        )
+
+    # Check if already deleted
+    if article.status == "deleted":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Article is already deleted"
+        )
+
+    # Check permissions: Admin/Leader can delete any, regular CM can only delete their own
+    is_admin_user = is_admin(current_user)
+    is_leader = verify_content_manager_leader(current_user)
+    
+    if not (is_admin_user or is_leader) and article.created_by != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete your own articles"
+        )
+
+    # Soft delete: change status to 'deleted'
+    article.status = "deleted"
+    db.commit()
+    db.refresh(article)
+
+    return article
+
 @router.get("/users/{user_id}", response_model=List[ArticleResponse])
 async def get_articles_by_user(
     user_id: int,
@@ -310,7 +438,8 @@ async def get_articles_by_user(
 ):
     """
     Get all articles created by a specific user.
-    Accessible only by Admins or Content Manager Leaders.
+    - Admins and Content Manager Leaders can view any user's articles
+    - Content Managers can view their own articles
     """
     if not current_user:
         raise HTTPException(
@@ -321,8 +450,14 @@ async def get_articles_by_user(
     # Check for admin or content manager leader permissions
     is_admin_user = is_admin(current_user)
     is_leader = verify_content_manager_leader(current_user)
-
-    if not (is_admin_user or is_leader):
+    is_content_manager = has_permission(current_user, "Content Manager")
+    
+    # Allow if:
+    # 1. User is Admin or Content Manager Leader (can view any user's articles)
+    # 2. User is Content Manager viewing their own articles
+    is_viewing_own_articles = (current_user.user_id == user_id)
+    
+    if not (is_admin_user or is_leader or (is_content_manager and is_viewing_own_articles)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to view articles by this user"
@@ -336,10 +471,11 @@ async def get_articles_by_user(
             detail=f"User with id {user_id} not found"
         )
 
-    # Query for articles by the specified user
+    # Query for articles by the specified user (exclude deleted)
     user_articles = (
         db.query(Article)
         .filter(Article.created_by == user_id)
+        .filter(Article.status != "deleted")
         .outerjoin(Users, Users.user_id == Article.created_by)
         .outerjoin(Major)
         .outerjoin(Specialization)

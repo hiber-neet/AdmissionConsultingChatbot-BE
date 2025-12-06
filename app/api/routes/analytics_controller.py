@@ -16,9 +16,10 @@ def check_analytics_permission(current_user: entities.Users = Depends(get_curren
         raise HTTPException(status_code=403, detail="Not authenticated")
 
     # Use the standard has_permission function which handles admin bypassing
-    is_admin = has_permission(current_user, "admin")
-    is_consultant = has_permission(current_user, "consultant")  
-    is_content_manager = has_permission(current_user, "content_manager")
+    # Permission names should match the database exactly (with spaces)
+    is_admin = has_permission(current_user, "Admin")
+    is_consultant = has_permission(current_user, "Consultant")  
+    is_content_manager = has_permission(current_user, "Content Manager")
 
     print(f"DEBUG: User {current_user.user_id} - admin:{is_admin}, consultant:{is_consultant}, content_manager:{is_content_manager}")
 
@@ -72,10 +73,18 @@ async def get_knowledge_gaps(
             desc('frequency')
         ).limit(20).all()
         
-        # Get existing training questions (no created_at field available)
-        existing_training = db.query(entities.TrainingQuestionAnswer.question).filter(
+        # Get existing training questions with intent information
+        existing_training = db.query(
+            entities.TrainingQuestionAnswer.question,
+            entities.TrainingQuestionAnswer.intent_id,
+            entities.Intent.intent_name
+        ).outerjoin(
+            entities.Intent, 
+            entities.TrainingQuestionAnswer.intent_id == entities.Intent.intent_id
+        ).filter(
             entities.TrainingQuestionAnswer.question.isnot(None)
         ).all()
+        
         existing_q_texts = [q.question.lower().strip() for q in existing_training if q.question]
         
         knowledge_gaps = []
@@ -89,10 +98,15 @@ async def get_knowledge_gaps(
             
             is_covered = False
             best_match_score = 0
+            best_match_intent_id = None
+            best_match_intent_name = None
             
             # Check against each training question
-            for training_q in existing_q_texts:
-                training_words = set(training_q.split())
+            for training_q, intent_id, intent_name in existing_training:
+                if not training_q:
+                    continue
+                training_q_lower = training_q.lower().strip()
+                training_words = set(training_q_lower.split())
                 
                 # Method 1: Word overlap (existing)
                 word_overlap = len(question_words & training_words)
@@ -100,13 +114,13 @@ async def get_knowledge_gaps(
                 
                 # Method 2: Substring similarity
                 substring_score = 0
-                if training_q in question_lower or question_lower in training_q:
+                if training_q_lower in question_lower or question_lower in training_q_lower:
                     substring_score = 0.8
                 
                 # Method 3: Key phrase matching
                 key_phrase_score = 0
                 question_key_phrases = [phrase.strip() for phrase in question_lower.replace('?', '').split() if len(phrase) > 3]
-                training_key_phrases = [phrase.strip() for phrase in training_q.replace('?', '').split() if len(phrase) > 3]
+                training_key_phrases = [phrase.strip() for phrase in training_q_lower.replace('?', '').split() if len(phrase) > 3]
                 
                 if question_key_phrases and training_key_phrases:
                     common_key_phrases = set(question_key_phrases) & set(training_key_phrases)
@@ -120,11 +134,15 @@ async def get_knowledge_gaps(
                 if combined_score > 0.6 or word_overlap > 2:
                     is_covered = True
                     best_match_score = combined_score
+                    best_match_intent_id = intent_id
+                    best_match_intent_name = intent_name
                     break
                     
                 # Track best match even if not covered
                 if combined_score > best_match_score:
                     best_match_score = combined_score
+                    best_match_intent_id = intent_id
+                    best_match_intent_name = intent_name
             
             # Smart Grace Period Logic using temporal patterns
             grace_period_needed = False
@@ -144,41 +162,24 @@ async def get_knowledge_gaps(
                     is_covered = False  # Keep in list during grace period
             
             if not is_covered:
-                # Determine priority based on frequency and recency
-                if frequency >= 15:
-                    priority = "high"
-                elif frequency >= 8:
-                    priority = "medium"
-                else:
-                    priority = "low"
-                
-                # Enhanced category detection
-                category = "General"
-                question_lower = question_text.lower()
-                if any(word in question_lower for word in ['admission', 'apply', 'application', 'admit', 'entrance', 'enroll']):
-                    category = "Admissions"
-                elif any(word in question_lower for word in ['course', 'program', 'study', 'academic', 'class', 'curriculum', 'major', 'degree']):
-                    category = "Academic"
-                elif any(word in question_lower for word in ['fee', 'cost', 'tuition', 'scholarship', 'financial', 'loan', 'grant', 'funding']):
-                    category = "Financial"
-                elif any(word in question_lower for word in ['campus', 'dormitory', 'housing', 'facility', 'student life', 'activities']):
-                    category = "Campus Life"
-                elif any(word in question_lower for word in ['career', 'job', 'employment', 'internship', 'graduation']):
-                    category = "Career Services"
+                # Use intent name from best matching training question, or "Unclassified" if no match
+                intent_name = best_match_intent_name if best_match_intent_name else "Unclassified"
                 
                 # Enhanced suggested action
-                suggested_action = f"Create comprehensive answer for this {category.lower()} question"
+                suggested_action = "Create comprehensive answer for this question"
                 if grace_period_needed:
-                    suggested_action = f"Monitor effectiveness - recent activity detected for {category.lower()} question"
+                    suggested_action = "Monitor effectiveness - recent activity detected"
                 elif best_match_score > 0.3:
-                    suggested_action = f"Improve existing answer - partial match found for {category.lower()} question"
+                    suggested_action = f"Improve existing answer - partial match found (Intent: {intent_name})"
+                elif best_match_intent_name:
+                    suggested_action = f"Consider adding to '{intent_name}' intent"
                 
                 knowledge_gaps.append({
                     "id": idx + 1,
                     "question": question_text,
                     "frequency": frequency,
-                    "priority": priority,
-                    "category": category,
+                    "intent_id": best_match_intent_id,
+                    "intent_name": intent_name,
                     "suggestedAction": suggested_action,
                     "last_asked": last_asked.strftime('%Y-%m-%d') if last_asked else None,
                     "first_asked": first_asked.strftime('%Y-%m-%d') if first_asked else None,
@@ -191,6 +192,55 @@ async def get_knowledge_gaps(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing knowledge gaps: {str(e)}")
+
+@router.get("/recent-questions")
+async def get_recent_questions(
+    limit: int = Query(5, description="Number of recent questions to return"),
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_analytics_permission)
+):
+    """
+    Get the most recent questions asked to the chatbot (from chatbot sessions only)
+    """
+    try:
+        # Get the most recent user questions from chatbot sessions only
+        # Join with ChatSession to filter by session_type = 'chatbot'
+        recent_interactions = (
+            db.query(entities.ChatInteraction)
+            .join(entities.ChatSession, entities.ChatInteraction.session_id == entities.ChatSession.chat_session_id)
+            .filter(entities.ChatSession.session_type == 'chatbot')
+            .filter(entities.ChatInteraction.is_from_bot == False)
+            .filter(entities.ChatInteraction.message_text.isnot(None))
+            .order_by(desc(entities.ChatInteraction.timestamp))
+            .limit(limit)
+            .all()
+        )
+        
+        questions = []
+        for interaction in recent_interactions:
+            # Get user info if available
+            user_name = "Anonymous"
+            if interaction.sender_id:
+                user = db.query(entities.Users).filter(entities.Users.user_id == interaction.sender_id).first()
+                if user:
+                    user_name = user.full_name or user.username
+            
+            questions.append({
+                "id": interaction.interaction_id,
+                "question": interaction.message_text,
+                "timestamp": interaction.timestamp.strftime('%Y-%m-%d %H:%M:%S') if isinstance(interaction.timestamp, datetime) else str(interaction.timestamp),
+                "user_name": user_name,
+                "rating": interaction.rating
+            })
+        
+        return {
+            "status": "success",
+            "data": questions,
+            "message": f"Retrieved {len(questions)} recent chatbot questions"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching recent questions: {str(e)}")
 
 @router.get("/low-satisfaction-answers")
 async def get_low_satisfaction_answers(
@@ -534,14 +584,22 @@ async def get_consultant_statistics(
     Get consultant dashboard statistics
     """
     try:
-        # Total queries count
-        total_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).filter(
+        # Total queries count (chatbot sessions only)
+        total_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).join(
+            entities.ChatSession, entities.ChatInteraction.session_id == entities.ChatSession.chat_session_id
+        ).filter(
+            entities.ChatSession.session_type == 'chatbot'
+        ).filter(
             entities.ChatInteraction.is_from_bot == False
         ).scalar() or 0
         
         # Queries in last 30 days for growth calculation
         thirty_days_ago = datetime.now() - timedelta(days=30)
-        recent_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).filter(
+        recent_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).join(
+            entities.ChatSession, entities.ChatInteraction.session_id == entities.ChatSession.chat_session_id
+        ).filter(
+            entities.ChatSession.session_type == 'chatbot'
+        ).filter(
             and_(
                 entities.ChatInteraction.is_from_bot == False,
                 entities.ChatInteraction.timestamp >= thirty_days_ago.date()
@@ -550,7 +608,11 @@ async def get_consultant_statistics(
         
         # Previous 30 days for comparison
         sixty_days_ago = datetime.now() - timedelta(days=60)
-        previous_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).filter(
+        previous_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).join(
+            entities.ChatSession, entities.ChatInteraction.session_id == entities.ChatSession.chat_session_id
+        ).filter(
+            entities.ChatSession.session_type == 'chatbot'
+        ).filter(
             and_(
                 entities.ChatInteraction.is_from_bot == False,
                 entities.ChatInteraction.timestamp >= sixty_days_ago.date(),
@@ -569,24 +631,80 @@ async def get_consultant_statistics(
         accuracy_rate = 85  # Mock value
         accuracy_improvement = 5  # Mock value
         
-        # Most active time (mock for now)
-        most_active_time = "2:00 PM - 4:00 PM"
-        
-        # Unanswered queries (knowledge gaps)
-        unanswered_queries = db.query(func.count(func.distinct(entities.ChatInteraction.message_text))).filter(
+        # Most active day (since we only have date, not time) - chatbot sessions only
+        # Get the day of week with most questions in the last 30 days
+        day_counts = {}
+        day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        recent_interactions = db.query(entities.ChatInteraction.timestamp).join(
+            entities.ChatSession, entities.ChatInteraction.session_id == entities.ChatSession.chat_session_id
+        ).filter(
+            entities.ChatSession.session_type == 'chatbot'
+        ).filter(
             and_(
                 entities.ChatInteraction.is_from_bot == False,
                 entities.ChatInteraction.timestamp >= thirty_days_ago.date()
             )
-        ).scalar() or 0
-        unanswered_queries = max(0, int(unanswered_queries * 0.2))  # Estimate 20% are unanswered
+        ).all()
         
-        # Questions over time (last 7 days)
+        for interaction in recent_interactions:
+            if interaction.timestamp:
+                # Get day of week (0 = Monday, 6 = Sunday)
+                day_of_week = interaction.timestamp.weekday() if hasattr(interaction.timestamp, 'weekday') else 0
+                day_name = day_names[day_of_week]
+                day_counts[day_name] = day_counts.get(day_name, 0) + 1
+        
+        # Find most active day
+        most_active_time = max(day_counts.items(), key=lambda x: x[1])[0] if day_counts else "Monday"
+        
+        # Unanswered queries (knowledge gaps) - get actual count from knowledge gaps analysis
+        # Get user questions from the last 30 days
+        user_questions = (
+            db.query(
+                entities.ChatInteraction.message_text,
+                func.count(entities.ChatInteraction.interaction_id).label('frequency')
+            )
+            .filter(entities.ChatInteraction.is_from_bot == False)
+            .filter(entities.ChatInteraction.timestamp >= thirty_days_ago.date())
+            .filter(entities.ChatInteraction.message_text.isnot(None))
+            .filter(func.length(entities.ChatInteraction.message_text) > 10)  # Filter out very short messages
+            .group_by(entities.ChatInteraction.message_text)
+            .having(func.count(entities.ChatInteraction.interaction_id) >= 3)  # min_frequency = 3
+            .all()
+        )
+        
+        # Get all training questions for comparison
+        training_questions = db.query(entities.TrainingQuestionAnswer.question).all()
+        training_set = {q.question.lower().strip() for q in training_questions if q.question}
+        
+        # Count knowledge gaps (user questions not in training data)
+        unanswered_queries = 0
+        for user_q, frequency in user_questions:
+            if user_q:
+                user_q_clean = user_q.lower().strip()
+                # Check if question is in training data
+                if user_q_clean not in training_set:
+                    # Check for partial matches
+                    best_match_score = 0
+                    for train_q in training_set:
+                        common_words = set(user_q_clean.split()) & set(train_q.split())
+                        if common_words:
+                            score = len(common_words) / max(len(user_q_clean.split()), len(train_q.split()))
+                            best_match_score = max(best_match_score, score)
+                    
+                    # If no good match found (< 60% similarity), count as knowledge gap
+                    if best_match_score < 0.6:
+                        unanswered_queries += 1
+        
+        # Questions over time (last 7 days) - chatbot sessions only
         seven_days_ago = datetime.now() - timedelta(days=7)
         questions_over_time = []
         for i in range(7):
             day = seven_days_ago + timedelta(days=i)
-            day_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).filter(
+            day_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).join(
+                entities.ChatSession, entities.ChatInteraction.session_id == entities.ChatSession.chat_session_id
+            ).filter(
+                entities.ChatSession.session_type == 'chatbot'
+            ).filter(
                 and_(
                     entities.ChatInteraction.is_from_bot == False,
                     func.date(entities.ChatInteraction.timestamp) == day.date()
@@ -627,57 +745,6 @@ async def get_consultant_statistics(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting consultant statistics: {str(e)}")
-
-@router.get("/analytics-summary")
-async def get_analytics_summary(
-    db: Session = Depends(get_db),
-    current_user: entities.Users = Depends(check_analytics_permission)
-):
-    """
-    Get summary statistics for the analytics dashboard
-    """
-    try:
-        # Count knowledge gaps (recent questions without answers)
-        date_threshold = (datetime.now() - timedelta(days=30)).date()
-        
-        user_questions_count = db.query(func.count(func.distinct(entities.ChatInteraction.message_text))).filter(
-            and_(
-                entities.ChatInteraction.is_from_bot == False,
-                entities.ChatInteraction.timestamp >= date_threshold,
-                func.length(entities.ChatInteraction.message_text) > 10
-            )
-        ).scalar() or 0
-        
-        existing_qa_count = db.query(func.count(entities.TrainingQuestionAnswer.question_id)).scalar() or 0
-        
-        # Estimate knowledge gaps (simplified)
-        knowledge_gaps_count = max(0, int(user_questions_count * 0.3))  # Rough estimate
-        
-        # Count low satisfaction answers
-        low_satisfaction_count = db.query(func.count(entities.FaqStatistics.faq_id)).filter(
-            or_(
-                entities.FaqStatistics.rating < 3.5,
-                entities.FaqStatistics.success_rate < 0.7
-            )
-        ).scalar() or 0
-        
-        # Count trending topics (mock for now since it's complex to calculate dynamically)
-        trending_topics_count = 4  # This would be calculated from the actual trending analysis
-        
-        # Total chat interactions for context
-        total_interactions = db.query(func.count(entities.ChatInteraction.interaction_id)).scalar() or 0
-        
-        return {
-            "knowledge_gaps_count": knowledge_gaps_count,
-            "low_satisfaction_count": low_satisfaction_count,
-            "trending_topics_count": trending_topics_count,
-            "total_interactions": total_interactions,
-            "existing_qa_count": existing_qa_count,
-            "user_questions_count": user_questions_count
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting analytics summary: {str(e)}")
 
 @router.get("/category-statistics")
 async def get_category_statistics(
@@ -774,3 +841,305 @@ async def get_category_statistics(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting category statistics: {str(e)}")
+
+
+# ==================== DASHBOARD ANALYTICS ====================
+
+@router.get("/dashboard/metrics")
+async def get_dashboard_metrics(
+    days: int = Query(7, description="Number of days to look back"),
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_analytics_permission)
+):
+    """
+    Get key dashboard metrics:
+    - Active chatbot sessions (chatbot sessions with no end_time)
+    - Total customers (users with Student or Parent role)
+    - Active live chat sessions (live sessions with no end_time)
+    """
+    try:
+        # Active Chatbot Sessions: sessions with session_type = "chatbot" and end_time IS NULL
+        active_chatbot_sessions = db.query(entities.ChatSession).filter(
+            and_(
+                entities.ChatSession.session_type == "chatbot",
+                entities.ChatSession.end_time.is_(None)
+            )
+        ).count()
+        
+        # Total Customers: count users with role_name = "Student" or "Parent"
+        total_customers = db.query(entities.Users).join(
+            entities.Role, entities.Users.role_id == entities.Role.role_id
+        ).filter(
+            or_(
+                entities.Role.role_name == "Student",
+                entities.Role.role_name == "Parent"
+            )
+        ).count()
+        
+        # Active Live Chat Sessions: sessions with session_type = "live" and end_time IS NULL
+        active_live_sessions = db.query(entities.ChatSession).filter(
+            and_(
+                entities.ChatSession.session_type == "live",
+                entities.ChatSession.end_time.is_(None)
+            )
+        ).count()
+        
+        return {
+            "active_chatbot_sessions": active_chatbot_sessions,
+            "total_customers": total_customers,
+            "active_live_sessions": active_live_sessions,
+            "period_days": days
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting dashboard metrics: {str(e)}")
+
+
+@router.get("/dashboard/chatbot-requests")
+async def get_chatbot_requests(
+    days: int = Query(30, description="Number of days to get data for"),
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_analytics_permission)
+):
+    """
+    Get total chatbot requests over the last 30 days.
+    Shows customer messages vs chatbot responses in chatbot sessions only.
+    """
+    try:
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+        
+        # Get chatbot session IDs first (session_type = "chatbot")
+        chatbot_session_ids = db.query(entities.ChatSession.chat_session_id).filter(
+            entities.ChatSession.session_type == "chatbot"
+        ).subquery()
+        
+        # Get customer messages (is_from_bot = False) grouped by date
+        customer_messages_by_date = db.query(
+            func.date(entities.ChatInteraction.timestamp).label('date'),
+            func.count(entities.ChatInteraction.interaction_id).label('customer_count')
+        ).filter(
+            and_(
+                entities.ChatInteraction.session_id.in_(chatbot_session_ids),
+                entities.ChatInteraction.is_from_bot == False,
+                entities.ChatInteraction.timestamp >= start_date
+            )
+        ).group_by(
+            func.date(entities.ChatInteraction.timestamp)
+        ).all()
+        
+        # Get chatbot responses (is_from_bot = True) grouped by date
+        chatbot_messages_by_date = db.query(
+            func.date(entities.ChatInteraction.timestamp).label('date'),
+            func.count(entities.ChatInteraction.interaction_id).label('chatbot_count')
+        ).filter(
+            and_(
+                entities.ChatInteraction.session_id.in_(chatbot_session_ids),
+                entities.ChatInteraction.is_from_bot == True,
+                entities.ChatInteraction.timestamp >= start_date
+            )
+        ).group_by(
+            func.date(entities.ChatInteraction.timestamp)
+        ).all()
+        
+        # Create date range
+        date_data = {}
+        current_date = start_date
+        while current_date <= end_date:
+            date_str = current_date.strftime('%a')  # Mon, Tue, Wed format
+            date_key = current_date.date()
+            date_data[date_str] = {
+                'name': date_str,
+                'customer': 0,  # Customer messages (green - was "Resolved")
+                'chatbot': 0,   # Chatbot responses (blue - was "Total")
+                'date': date_key
+            }
+            current_date += timedelta(days=1)
+        
+        # Fill in customer messages data
+        for msg in customer_messages_by_date:
+            date_str = msg.date.strftime('%a')
+            if date_str in date_data:
+                date_data[date_str]['customer'] = msg.customer_count
+        
+        # Fill in chatbot messages data
+        for msg in chatbot_messages_by_date:
+            date_str = msg.date.strftime('%a')
+            if date_str in date_data:
+                date_data[date_str]['chatbot'] = msg.chatbot_count
+        
+        # Convert to list and sort by date
+        result = list(date_data.values())
+        result.sort(key=lambda x: x['date'])
+        
+        # Remove the date key from response
+        for item in result:
+            del item['date']
+            
+        return result
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting chatbot requests: {str(e)}")
+
+
+@router.get("/dashboard/admission-stats")
+async def get_admission_dashboard_stats(
+    days: int = Query(30, description="Number of days for chatbot interactions"),
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(get_current_user)
+):
+    """
+    Get statistics specifically for admission officer dashboard:
+    - Ended chatbot sessions (last 30 days)
+    - Total published articles
+    - Current live chat queue count for the officer
+    - Drafted articles count
+    - Weekly article publication stats (last 7 days)
+    - Intent distribution from training questions
+    """
+    try:
+        # Check if user is an admission officer
+        if not has_permission(current_user, "Admission Official"):
+            raise HTTPException(status_code=403, detail="Admission Official permission required")
+        
+        # 1. Ended Chatbot Sessions (last 30 days)
+        date_threshold = datetime.now() - timedelta(days=days)
+        ended_chatbot_sessions = db.query(entities.ChatSession).filter(
+            and_(
+                entities.ChatSession.session_type == "chatbot",
+                entities.ChatSession.end_time.isnot(None),
+                entities.ChatSession.end_time >= date_threshold
+            )
+        ).count()
+        
+        # 2. Total Published Articles
+        published_articles = db.query(entities.Article).filter(
+            entities.Article.status == "published"
+        ).count()
+        
+        # 3. Current Live Chat Queue Count for this officer
+        queue_count = db.query(entities.LiveChatQueue).filter(
+            and_(
+                entities.LiveChatQueue.admission_official_id == current_user.user_id,
+                entities.LiveChatQueue.status == "waiting"
+            )
+        ).count()
+        
+        # 4. Drafted Articles
+        drafted_articles = db.query(entities.Article).filter(
+            entities.Article.status == "drafted"
+        ).count()
+        
+        # 5. Weekly Article Publication Stats (last 7 days)
+        week_threshold = datetime.now() - timedelta(days=7)
+        weekly_articles = db.query(
+            func.date(entities.Article.create_at).label('date'),
+            func.count(entities.Article.article_id).label('count')
+        ).filter(
+            and_(
+                entities.Article.status == "published",
+                entities.Article.create_at >= week_threshold
+            )
+        ).group_by(
+            func.date(entities.Article.create_at)
+        ).order_by(
+            func.date(entities.Article.create_at)
+        ).all()
+        
+        # Create a dictionary from the query results
+        articles_by_date = {date_obj: count for date_obj, count in weekly_articles}
+        
+        # Generate all 7 days with 0 for days without articles
+        weekly_data = []
+        for i in range(6, -1, -1):  # 6 days ago to today
+            date_obj = (datetime.now() - timedelta(days=i)).date()
+            count = articles_by_date.get(date_obj, 0)
+            
+            # Vietnamese day names
+            day_names = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
+            day_name = day_names[date_obj.weekday()]  # Mon=0 -> T2, Sun=6 -> CN
+            
+            weekly_data.append({
+                "date": day_name,
+                "articles": count
+            })
+        
+        # 6. Intent Distribution from Training Questions
+        intent_stats = db.query(
+            entities.Intent.intent_name,
+            func.count(entities.TrainingQuestionAnswer.question_id).label('count')
+        ).join(
+            entities.TrainingQuestionAnswer,
+            entities.Intent.intent_id == entities.TrainingQuestionAnswer.intent_id
+        ).group_by(
+            entities.Intent.intent_name
+        ).order_by(
+            desc('count')
+        ).limit(10).all()
+        
+        intent_distribution = [
+            {
+                "topic": intent_name,
+                "count": count
+            }
+            for intent_name, count in intent_stats
+        ]
+        
+        return {
+            "chatbot_interactions": ended_chatbot_sessions,
+            "published_articles": published_articles,
+            "queue_count": queue_count,
+            "drafted_articles": drafted_articles,
+            "weekly_articles": weekly_data,
+            "intent_distribution": intent_distribution,
+            "period_days": days
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting admission dashboard stats: {str(e)}")
+
+
+@router.get("/dashboard/system-health")
+async def get_system_health(
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_analytics_permission)
+):
+    """
+    Get system health metrics
+    """
+    try:
+        # Total knowledge base articles
+        total_articles = db.query(entities.Article).filter(
+            entities.Article.status == 'published'
+        ).count()
+        
+        # Total knowledge documents
+        total_kb_docs = db.query(entities.KnowledgeBaseDocument).count()
+        
+        # Training QA pairs
+        total_qa_pairs = db.query(entities.TrainingQuestionAnswer).count()
+        
+        # Recent activity (errors, warnings, etc.)
+        recent_failed_interactions = db.query(entities.ChatInteraction).filter(
+            and_(
+                entities.ChatInteraction.rating.isnot(None),
+                entities.ChatInteraction.rating < 3,  # Low ratings
+                entities.ChatInteraction.timestamp >= datetime.now() - timedelta(hours=24)
+            )
+        ).count()
+        
+        # Total users count (all users in the system)
+        total_users = db.query(entities.Users).count()
+        
+        return {
+            "total_users": total_users,
+            "total_articles": total_articles,
+            "total_qa_pairs": total_qa_pairs,
+            "total_kb_docs": total_kb_docs,
+            "recent_errors": recent_failed_interactions
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting system health: {str(e)}")

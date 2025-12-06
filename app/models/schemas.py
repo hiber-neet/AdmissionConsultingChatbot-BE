@@ -404,14 +404,17 @@ class ArticleCreate(BaseModel):
     title: str
     description: str
     url: Optional[str] = None
+    link_image: Optional[str] = None
+    note: Optional[str] = None
     major_id: Optional[int] = None
     specialization_id: Optional[int] = None
 
 class ArticleUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
-    content: Optional[str] = None
     url: Optional[str] = None
+    link_image: Optional[str] = None
+    note: Optional[str] = None
     major_id: Optional[int] = None
     specialization_id: Optional[int] = None
 
@@ -424,6 +427,8 @@ class ArticleResponse(BaseModel):
     title: str
     description: str
     url: Optional[str]
+    link_image: Optional[str] = None
+    note: Optional[str] = None
     status: str
     create_at: date
     created_by: int
