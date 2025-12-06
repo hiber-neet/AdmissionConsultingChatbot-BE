@@ -184,10 +184,14 @@ async def chat_socket(websocket: WebSocket, session_id: int):
     await websocket.accept()
     await live_chat_service.join_chat(websocket, session_id)
 
-    while True:
-        data = await websocket.receive_json()
-        await live_chat_service.broadcast_message(
-            session_id=session_id,
-            sender_id=data["sender_id"],
-            message=data["message"]
-        )
+    try:
+        while True:
+            data = await websocket.receive_json()
+            await live_chat_service.broadcast_message(
+                session_id=session_id,
+                sender_id=data["sender_id"],
+                message=data["message"]
+            )
+    finally:
+        # Always clean up the WebSocket connection when it ends
+        await live_chat_service.leave_chat(websocket, session_id)

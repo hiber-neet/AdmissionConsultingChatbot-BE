@@ -179,27 +179,52 @@ class LiveChatService:
     async def broadcast_message(self, session_id: int, sender_id: int, message: str):
         db = SessionLocal()
 
-        chat = ChatInteraction(
-            session_id=session_id,
-            sender_id=sender_id,
-            message_text=message,
-            timestamp=datetime.now(),
-            is_from_bot=False
-        )
-        db.add(chat)
-        db.commit()
-        db.close()
+        try:
+            chat = ChatInteraction(
+                session_id=session_id,
+                sender_id=sender_id,
+                message_text=message,
+                timestamp=datetime.now().date(),  # Use .date() for Date column
+                is_from_bot=False
+            )
+            db.add(chat)
+            db.commit()
+            db.refresh(chat)
 
-        payload = {
-            "event": "message",
-            "session_id": session_id,
-            "sender_id": sender_id,
-            "message": message,
-            "timestamp": datetime.now().isoformat()
-        }
+            payload = {
+                "event": "message",
+                "session_id": session_id,
+                "sender_id": sender_id,
+                "message": message,
+                "timestamp": datetime.now().isoformat(),
+                "interaction_id": chat.interaction_id
+            }
 
-        for conn in self.active_sessions.get(session_id, []):
-            await conn.send_json(payload)
+            # Send to all connections in this session
+            for conn in self.active_sessions.get(session_id, []):
+                try:
+                    await conn.send_json(payload)
+                except Exception as e:
+                    print(f"Error sending to connection: {e}")
+                    # Remove broken connections
+                    if conn in self.active_sessions[session_id]:
+                        self.active_sessions[session_id].remove(conn)
+
+        except Exception as e:
+            db.rollback()
+            print(f"Error saving/broadcasting message: {e}")
+            raise  # Re-raise to let WebSocket handler know
+        finally:
+            db.close()
+
+    async def leave_chat(self, websocket, session_id: int):
+        """Remove WebSocket connection from active session"""
+        if session_id in self.active_sessions:
+            if websocket in self.active_sessions[session_id]:
+                self.active_sessions[session_id].remove(websocket)
+            # Clean up empty session lists
+            if not self.active_sessions[session_id]:
+                del self.active_sessions[session_id]
 
 
     # ===============================================================
