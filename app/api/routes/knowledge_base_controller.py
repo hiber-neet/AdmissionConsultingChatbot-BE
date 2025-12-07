@@ -39,7 +39,7 @@ def check_view_permission(current_user: entities.Users = Depends(get_current_use
     return current_user
 @router.post("/upload/document")
 async def upload_document(
-    intend_id: int,
+    intent_id: int,
     file: UploadFile = File(...),
     title: str = Form(None),
     category: str = Form(None),
@@ -132,7 +132,7 @@ async def upload_document(
         chunk_ids = service.add_document(
             current_user_id,
             content_text,
-            intend_id,
+            intent_id,
             {
                 
                 "type": file.content_type,
