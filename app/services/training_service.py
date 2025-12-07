@@ -794,14 +794,24 @@ class TrainingService:
         
         
         # TIER 2: No training Q&A match, try documents
-        else: doc_results = self.search_documents(query, top_k=5)
-        return {
+        doc_results = self.search_documents(query, top_k=5)
+        if doc_results and len(doc_results) > 0: 
+            return {
+                    "response": doc_results,
+                    "response_source": "document",
+                    "confidence": doc_results[0].score,
+                    "top_match": doc_results[0],
+                    "intent_id": doc_results[0].payload.get("intent_id"),
+                    "sources": [r.payload.get("document_id") for r in doc_results]
+                }
+        else:
+            return {
                 "response": doc_results,
                 "response_source": "document",
-                "confidence": doc_results[0].score,
-                "top_match": doc_results[0],
-                "intent_id": doc_results[0].payload.get("intent_id"),
-                "sources": [r.payload.get("document_id") for r in doc_results]
+                "confidence": 0.0,
+                "top_match": None,
+                "intent_id": 0,
+                "sources": []
             }
         
     def _get_user_personality_and_academics(self, user_id: int, db: Session) -> Dict[str, Any]:
