@@ -1,9 +1,7 @@
 from datetime import datetime
-from typing import Any, Dict, List
-from langchain_google_genai import GoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from typing import Any, Dict, List, Optional
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters  import RecursiveCharacterTextSplitter
-from langchain_classic.memory import ConversationBufferMemory
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 import os
@@ -163,6 +161,46 @@ class TrainingService:
                 })
             
             return result
+        finally:
+            db.close()
+
+    def delete_chat_session(self, session_id: int, user_id: Optional[int] = None) -> bool:
+        """
+        Xóa 1 session chat:
+        - Nếu có user_id: chỉ xóa session thuộc về user đó
+        - Nếu không có user_id: xóa theo session_id (guest session)
+
+        Trả về:
+            True  nếu xóa được
+            False nếu không tìm thấy session
+        """
+        db = SessionLocal()
+        try:
+            query = db.query(ChatSession)
+
+            # Nếu có user_id thì check session thuộc user đó
+            if user_id:
+                query = query.join(ParticipateChatSession).filter(
+                    ParticipateChatSession.user_id == user_id
+                )
+
+            session = query.filter(
+                ChatSession.chat_session_id == session_id
+            ).first()
+
+            if not session:
+                return False
+
+            # Do ChatSession định nghĩa cascade="all, delete-orphan"
+            # nên xóa session sẽ tự xóa ChatInteraction & ParticipateChatSession liên quan
+            db.delete(session)
+            db.commit()
+            return True
+
+        except SQLAlchemyError as e:
+            db.rollback()
+            print(f"Error deleting session: {e}")
+            raise
         finally:
             db.close()
 
