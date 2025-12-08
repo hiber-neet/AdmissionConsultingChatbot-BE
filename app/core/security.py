@@ -208,17 +208,17 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)) -> O
             
         print(f"DEBUG: Token verified for email: {token_data.email}")
             
-        # Load user with permissions relationship using explicit join
-        from app.models.entities import Permission
-        user = db.query(Users).filter(Users.email == token_data.email).first()
+        # Load user with permissions relationship eagerly loaded
+        from sqlalchemy.orm import selectinload
+        user = db.query(Users).options(
+            selectinload(Users.permissions)
+        ).filter(Users.email == token_data.email).first()
+        
         print(f"DEBUG: Found user: {user.email if user else 'None'}")
         
         if user:
-            # Manually load permissions
-            permissions = db.query(Permission).join(Users.permissions).filter(Users.user_id == user.user_id).all()
-            user.permissions = permissions
-            print(f"DEBUG: Loaded {len(permissions)} permissions for user {user.user_id}")
-            for perm in permissions:
+            print(f"DEBUG: Loaded {len(user.permissions)} permissions for user {user.user_id}")
+            for perm in user.permissions:
                 print(f"DEBUG: Permission: {perm.permission_name}")
         
         if user is None or not user.status:

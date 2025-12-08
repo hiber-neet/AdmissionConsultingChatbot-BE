@@ -14,7 +14,7 @@ def upload_academic_score(
     if not current_user.customer_profile:
         raise HTTPException(status_code=403, detail="User is not a customer")
         
-    db_academic_score = entities.AcademicScore(academic_score.model_dump(), customer_id=current_user.user_id)
+    db_academic_score = entities.AcademicScore(**academic_score.model_dump(), customer_id=current_user.user_id)
     db.add(db_academic_score)
     db.commit()
     db.refresh(db_academic_score)

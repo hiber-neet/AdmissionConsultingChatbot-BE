@@ -34,6 +34,20 @@ async def submit_riasec(
 
     # 2) User có login → lưu vào DB
     try:
+        # Check if CustomerProfile exists, create if not
+        customer_profile = db.query(entities.CustomerProfile).filter(
+            entities.CustomerProfile.customer_id == current_user.user_id
+        ).first()
+        
+        if not customer_profile:
+            # Create CustomerProfile for this user
+            customer_profile = entities.CustomerProfile(
+                customer_id=current_user.user_id,
+                interest_id=None
+            )
+            db.add(customer_profile)
+            db.flush()  # Ensure the profile is created before adding RIASEC result
+        
         new_result = entities.RiasecResult(
             score_realistic=riasec_result.score_realistic,
             score_investigative=riasec_result.score_investigative,
@@ -66,8 +80,8 @@ def get_riasec_results(
 ):
     results = (
         db.query(entities.RiasecResult)
-        .filter(entities.RiasecResult.user_id == user_id)
-        .order_by(entities.RiasecResult.created_at.desc())
+        .filter(entities.RiasecResult.customer_id == user_id)
+        .order_by(entities.RiasecResult.result_id.desc())
         .all()
     )
 
