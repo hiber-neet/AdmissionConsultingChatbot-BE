@@ -1,0 +1,40 @@
+name: Deploy to Google Cloud VM
+
+# Kịch bản sẽ chạy khi có lệnh push vào nhánh main
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    name: Deploy to VM
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Deploy using SSH
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.HOST }}
+        username: ${{ secrets.USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: 22
+        # Đoạn script dưới đây sẽ chạy trên VM của bạn
+        script: |
+          # 1. Di chuyển vào thư mục code (lưu ý tên thư mục 'app' mà bạn đã git clone)
+          cd app
+
+          # 2. Lấy code mới nhất từ GitHub về
+          git pull origin main
+
+          # 3. Tạo lại file .env từ Secret (để cập nhật biến mới nếu có)
+          echo "${{ secrets.ENV_FILE }}" > .env
+
+          # 4. Build lại Docker và khởi động lại
+          # Dùng sudo nếu user của bạn cần quyền root (đã add group docker rồi nên không cần)
+          docker compose up -d --build
+
+          # 5. Dọn dẹp images cũ cho đỡ tốn dung lượng ổ cứng (Quan trọng với ổ 30GB)
+          docker image prune -f
