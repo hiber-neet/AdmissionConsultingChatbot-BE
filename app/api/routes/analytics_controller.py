@@ -242,6 +242,115 @@ async def get_recent_questions(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching recent questions: {str(e)}")
 
+@router.get("/user-questions")
+async def get_user_questions(
+    days: int = Query(30, ge=1, le=90, description="Number of days to look back (max 90 days)"),
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(10, ge=1, le=100, description="Number of questions per page"),
+    search: Optional[str] = Query(None, description="Search query to filter questions"),
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_analytics_permission)
+):
+    """
+    Get paginated user questions from chatbot sessions only (non-bot messages).
+    Limited to maximum 90 days to prevent loading too much data.
+    
+    Status determination:
+    - "answered": Question matches a training question in the database (exact or similar match)
+    - "unanswered": Question does not have a corresponding training question
+    """
+    try:
+        # Enforce maximum 90 days limit
+        days = min(days, 90)
+        cutoff_date = datetime.now() - timedelta(days=days)
+        
+        # Base query: get user questions from chatbot sessions
+        base_query = (
+            db.query(
+                entities.ChatInteraction.interaction_id,
+                entities.ChatInteraction.message_text,
+                entities.ChatInteraction.timestamp
+            )
+            .join(entities.ChatSession, entities.ChatInteraction.session_id == entities.ChatSession.chat_session_id)
+            .filter(
+                entities.ChatSession.session_type == 'chatbot',
+                entities.ChatInteraction.is_from_bot == False,
+                entities.ChatInteraction.message_text.isnot(None),
+                entities.ChatInteraction.timestamp >= cutoff_date
+            )
+        )
+        
+        # Apply search filter if provided
+        if search:
+            base_query = base_query.filter(
+                entities.ChatInteraction.message_text.ilike(f'%{search}%')
+            )
+        
+        # Get total count
+        total_count = base_query.count()
+        
+        # Calculate pagination
+        total_pages = (total_count + page_size - 1) // page_size
+        offset = (page - 1) * page_size
+        
+        # Get paginated results
+        questions = (
+            base_query
+            .order_by(desc(entities.ChatInteraction.timestamp))
+            .limit(page_size)
+            .offset(offset)
+            .all()
+        )
+        
+        # Format response and try to find matching intent from training data
+        formatted_questions = []
+        for q in questions:
+            # Try to find matching training question to determine intent and answered status
+            intent_name = "Uncategorized"
+            has_answer = False
+            
+            # Look for matching training questions (exact match or similar)
+            training_match = (
+                db.query(entities.TrainingQuestionAnswer, entities.Intent.intent_name)
+                .join(entities.Intent, entities.TrainingQuestionAnswer.intent_id == entities.Intent.intent_id)
+                .filter(
+                    or_(
+                        entities.TrainingQuestionAnswer.question == q.message_text,
+                        entities.TrainingQuestionAnswer.question.ilike(f'%{q.message_text}%')
+                    )
+                )
+                .first()
+            )
+            
+            if training_match:
+                intent_name = training_match[1]
+                has_answer = True
+            
+            formatted_questions.append({
+                "id": q.interaction_id,
+                "question": q.message_text,
+                "category": intent_name,
+                "timestamp": q.timestamp.strftime('%Y-%m-%d %H:%M:%S') if isinstance(q.timestamp, datetime) else str(q.timestamp),
+                "status": "answered" if has_answer else "unanswered"
+            })
+        
+        return {
+            "status": "success",
+            "data": formatted_questions,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total_count": total_count,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1
+            },
+            "message": f"Retrieved {len(formatted_questions)} user questions"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching user questions: {str(e)}")
+
 @router.get("/low-satisfaction-answers")
 async def get_low_satisfaction_answers(
     threshold: float = Query(3.5, description="Satisfaction threshold below which answers are considered low"),

@@ -2,18 +2,18 @@ from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, APIRouter
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
+from pathlib import Path
+import os
+import json
+import uuid
+from datetime import datetime
+
 from app.models.database import init_db, get_db
 from app.models.schemas import TrainingQuestionRequest, TrainingQuestionResponse, KnowledgeBaseDocumentResponse
 from app.models import entities
 from app.services.training_service import TrainingService
 from app.utils.document_processor import documentProcessor
 from app.core.security import get_current_user, has_permission
-from pathlib import Path
-from sqlalchemy.orm import Session
-import os
-import json
-import uuid
-from datetime import datetime
 
 router = APIRouter()
 
@@ -42,6 +42,23 @@ def check_view_permission(current_user: entities.Users = Depends(get_current_use
         )
     
     return current_user
+
+def get_document_or_404(document_id: int, db: Session) -> entities.KnowledgeBaseDocument:
+    """Helper function to get document by ID or raise 404"""
+    document = db.query(entities.KnowledgeBaseDocument).filter(
+        entities.KnowledgeBaseDocument.document_id == document_id
+    ).first()
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    return document
+
+def check_file_exists(file_path: str):
+    """Helper function to check if file exists on disk or raise 404"""
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on server")
+
 @router.post("/upload/document")
 async def upload_document(
     intent_id: int,
@@ -131,7 +148,6 @@ async def upload_document(
         raise HTTPException(status_code=500, detail=f"Failed to save document to database: {str(e)}")
 
     # STEP 6: CHUNK + EMBED + STORE IN QDRANT
-    # STEP 6: CHUNK + EMBED + STORE IN QDRANT
     try:
         service = TrainingService()
         chunk_ids = service.add_document(
@@ -139,7 +155,6 @@ async def upload_document(
             content_text,
             intent_id,
             {
-                
                 "type": file.content_type,
                 "filename": file.filename,
                 "document_id": document.document_id
@@ -254,22 +269,11 @@ def download_document(
     Download a specific document by its ID.
     Requires Admin, Consultant, or Admission permission.
     """
-    # Find the document in database
-    document = db.query(entities.KnowledgeBaseDocument).filter(
-        entities.KnowledgeBaseDocument.document_id == document_id
-    ).first()
+    document = get_document_or_404(document_id, db)
+    check_file_exists(document.file_path)
     
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    # Check if file exists on disk
-    file_path = document.file_path
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found on server")
-    
-    # Return the file for download
     return FileResponse(
-        path=file_path,
+        path=document.file_path,
         filename=document.title,
         media_type='application/octet-stream'
     )
@@ -284,21 +288,11 @@ def view_document(
     View/preview a specific document by its ID in browser.
     Requires Admin, Consultant, or Admission permission.
     """
-    # Find the document in database
-    document = db.query(entities.KnowledgeBaseDocument).filter(
-        entities.KnowledgeBaseDocument.document_id == document_id
-    ).first()
-    
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    # Check if file exists on disk
-    file_path = document.file_path
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found on server")
+    document = get_document_or_404(document_id, db)
+    check_file_exists(document.file_path)
     
     # Determine media type based on file extension
-    file_extension = Path(file_path).suffix.lower()
+    file_extension = Path(document.file_path).suffix.lower()
     media_type_mapping = {
         '.pdf': 'application/pdf',
         '.txt': 'text/plain',
@@ -312,9 +306,30 @@ def view_document(
     
     media_type = media_type_mapping.get(file_extension, 'application/octet-stream')
     
-    # Return the file for viewing in browser
     return FileResponse(
-        path=file_path,
+        path=document.file_path,
         media_type=media_type,
-        headers={"Content-Disposition": "inline"}  # This makes it open in browser instead of download
+        headers={"Content-Disposition": "inline"}
     )
+
+@router.get("/documents/{document_id}", response_model=KnowledgeBaseDocumentResponse)
+def get_document_by_id(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_view_permission)
+):
+    """
+    Get a specific document's metadata by its ID.
+    Requires Admin, Consultant, or Admission permission.
+    """
+    document = get_document_or_404(document_id, db)
+    
+    return {
+        "document_id": document.document_id,
+        "title": document.title,
+        "file_path": document.file_path,
+        "category": document.category,
+        "created_at": document.created_at,
+        "updated_at": document.updated_at,
+        "created_by": document.created_by
+    }
