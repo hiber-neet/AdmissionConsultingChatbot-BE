@@ -7,6 +7,8 @@ from app.services.training_service import TrainingService
 
 
 router = APIRouter()
+# Tạo 1 instance dùng chung
+service = TrainingService()
 #thêm 3 tầng check chat
 @router.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
@@ -194,35 +196,57 @@ async def websocket_chat(websocket: WebSocket):
         print("Client disconnected")
                 
 
-    # Tạo 1 phiên chat session mới
-    @router.post("/session/create")
-    def api_create_chat_session(user_id: int, session_type: str):
-        try:
-            session_id = training_service.create_chat_session(
-                user_id=user_id,
-                session_type=session_type
-            )
-            return {"session_id": session_id, "message": "Session created successfully"}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))       
+# ================== REST API: SESSION ==================
 
-    # Lấy lịch sử chat theo session ID
-    @router.get("/session/{session_id}/history")
-    def api_get_session_history(session_id: int, limit: int = 50):
-        try:
-            history = training_service.get_session_history(session_id, limit)
-            return {"session_id": session_id, "messages": history}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+# Tạo 1 phiên chat session mới
+@router.post("/session/create")
+def api_create_chat_session(user_id: int, session_type: str):
+    try:
+        session_id = service.create_chat_session(
+            user_id=user_id,
+            session_type=session_type
+        )
+        return {"session_id": session_id, "message": "Session created successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    # Lấy tất cả session của user
-    @router.get("/user/{user_id}/sessions")
-    def api_get_user_sessions(user_id: int):
-        try:
-            sessions = training_service.get_user_sessions(user_id)
-            return {"user_id": user_id, "sessions": sessions}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+
+# Lấy lịch sử chat theo session ID
+@router.get("/session/{session_id}/history")
+def api_get_session_history(session_id: int, limit: int = 50):
+    try:
+        history = service.get_session_history(session_id, limit)
+        return {"session_id": session_id, "messages": history}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Lấy tất cả session của user
+@router.get("/user/{user_id}/sessions")
+def api_get_user_sessions(user_id: int):
+    try:
+        sessions = service.get_user_sessions(user_id)
+        return {"user_id": user_id, "sessions": sessions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# Xóa 1 session chat
+@router.delete("/session/{session_id}")
+def api_delete_chat_session(session_id: int, user_id: int | None = None):
+    """
+    - Nếu truyền user_id: chỉ cho xóa session thuộc user đó
+    - Nếu không truyền user_id: xóa theo session_id (guest session)
+    """
+    try:
+        deleted = service.delete_chat_session(session_id=session_id, user_id=user_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return {"message": "Session deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 

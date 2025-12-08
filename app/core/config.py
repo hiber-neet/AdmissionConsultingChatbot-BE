@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str
     DATABASE_URL: str
 
+    POSTGRES_USER: str
+    POSTGRES_PASSWORD: str
+    POSTGRES_DB: str
     QDRANT_HOST: str
     QDRANT_PORT: str
     QDRANT_API_KEY: str
