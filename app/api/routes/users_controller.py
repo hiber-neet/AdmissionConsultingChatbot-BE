@@ -1,22 +1,55 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from app.models.database import get_db
 from app.models.schemas import (
     PermissionChangeRequest,
     PermissionRevokeRequest,
     BanUserRequest,
 )
-from app.models.entities import Users, UserPermission
+from app.models.entities import Users, UserPermission, Permission
 from app.core.security import has_permission, get_current_user, is_admin_or_admission_official
-from sqlalchemy import not_
+from sqlalchemy import not_, or_
 
 router = APIRouter()
+
+
+@router.get("/permissions")
+def get_all_permissions(db: Session = Depends(get_db), current_user: Users = Depends(get_current_user)):
+    """
+    Get all available permissions in the system.
+    Requires admin permission.
+    """
+    if not current_user or not has_permission(current_user, "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin permission required",
+        )
+
+    permissions = db.query(Permission).all()
+    return [{"permission_id": p.permission_id, "permission_name": p.permission_name} for p in permissions]
+
+
+@router.get("/roles")
+def get_all_roles(db: Session = Depends(get_db), current_user: Users = Depends(get_current_user)):
+    """
+    Get all available roles in the system.
+    Requires authentication.
+    """
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+
+    from app.models.entities import Role
+    roles = db.query(Role).all()
+    return [{"role_id": r.role_id, "role_name": r.role_name} for r in roles]
 
 
 @router.get("/students")
 def get_students(db: Session = Depends(get_db), current_user: Users = Depends(get_current_user)):
     """
-    Get all users who do not have any permissions (students).
+    Get all customer users (Students and Parents - users without permissions).
     Requires admin or admission official permission.
     """
     if not current_user or not is_admin_or_admission_official(current_user):
@@ -25,8 +58,37 @@ def get_students(db: Session = Depends(get_db), current_user: Users = Depends(ge
             detail="Admin or admission official permission required",
         )
 
-    students = db.query(Users).filter(not_(Users.permissions.any())).all()
-    return students
+    # Get users with no permissions (customers/students/parents)
+    # Also include users with Student or Parent roles explicitly
+    from app.models.entities import Role
+    
+    customers = db.query(Users).options(
+        selectinload(Users.permissions),
+        selectinload(Users.role)
+    ).outerjoin(Users.role).filter(
+        or_(
+            not_(Users.permissions.any()),  # Users with no permissions
+            Role.role_name.in_(['Student', 'Parent'])  # Or users with Student/Parent role
+        )
+    ).all()
+    
+    # Format the response to match staffs endpoint structure
+    result = []
+    for user in customers:
+        user_data = {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "status": user.status,
+            "role_id": user.role_id,
+            "role_name": user.role.role_name if user.role else None,  # Include role name
+            "password": user.password,  # Include for compatibility with existing frontend
+            "permissions": [{"permission_name": p.permission_name, "permission_id": p.permission_id} for p in user.permissions] if user.permissions else [],
+        }
+        result.append(user_data)
+    
+    return result
 
 
 @router.get("/staffs")
@@ -41,8 +103,40 @@ def get_staffs(db: Session = Depends(get_db), current_user: Users = Depends(get_
             detail="Admin permission required",
         )
 
-    staffs = db.query(Users).filter(Users.permissions.any(), Users.user_id != current_user.user_id).all()
-    return staffs
+    # Query users with permissions loaded and profile relationships
+    staffs = db.query(Users).options(
+        selectinload(Users.permissions),
+        selectinload(Users.consultant_profile),
+        selectinload(Users.content_manager_profile), 
+        selectinload(Users.admission_official_profile),
+        selectinload(Users.role)
+    ).filter(
+        Users.permissions.any(), 
+        Users.user_id != current_user.user_id
+    ).all()
+    
+    # Format the response to include permission names and profile indicators
+    result = []
+    for user in staffs:
+        user_data = {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "status": user.status,
+            "role_id": user.role_id,
+            "role_name": user.role.role_name if user.role else None,  # Include role name
+            "password": user.password,  # Include for compatibility with existing frontend
+            "permissions": [{"permission_name": p.permission_name, "permission_id": p.permission_id} for p in user.permissions],
+            "consultant_is_leader": user.consultant_profile.is_leader if user.consultant_profile else False,
+            "content_manager_is_leader": user.content_manager_profile.is_leader if user.content_manager_profile else False,
+            "consultant_profile": bool(user.consultant_profile),
+            "content_manager_profile": bool(user.content_manager_profile),
+            "admission_official_profile": bool(user.admission_official_profile),
+        }
+        result.append(user_data)
+    
+    return result
 
 
 @router.post("/permissions/grant")

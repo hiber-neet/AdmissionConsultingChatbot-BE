@@ -73,8 +73,21 @@ async def get_user_profile(
         # Safely get profiles - simplified for debugging
         try:
             if hasattr(user, 'customer_profile') and user.customer_profile:
-                profile_data["student_profile"] = {"status": "exists"}
-                print("Student profile exists")
+                customer_profile = user.customer_profile
+                student_profile_data = {}
+
+                # Safely get interest data
+                if customer_profile.interest:
+                    student_profile_data["interest"] = {
+                        "interest_id": customer_profile.interest.interest_id,
+                        "desired_major": customer_profile.interest.desired_major,
+                        "region": customer_profile.interest.region
+                    }
+                else:
+                    student_profile_data["interest"] = None
+                
+                profile_data["student_profile"] = student_profile_data
+                print("Student profile exists with interest data")
         except Exception as e:
             print(f"Error with student profile: {e}")
             
@@ -93,9 +106,21 @@ async def get_user_profile(
                 profile_data["content_manager_profile"] = {
                     "is_leader": user.content_manager_profile.is_leader
                 }
-                print("Content manager profile exists")
+                profile_data["content_manager_is_leader"] = user.content_manager_profile.is_leader
+                print(f"Content manager profile exists, is_leader: {user.content_manager_profile.is_leader}")
         except Exception as e:
             print(f"Error with content manager profile: {e}")
+            
+        try:
+            if hasattr(user, 'consultant_profile') and user.consultant_profile:
+                profile_data["consultant_profile"] = {
+                    "status": user.consultant_profile.status,
+                    "is_leader": user.consultant_profile.is_leader
+                }
+                profile_data["consultant_is_leader"] = user.consultant_profile.is_leader
+                print(f"Consultant profile exists, is_leader: {user.consultant_profile.is_leader}")
+        except Exception as e:
+            print(f"Error with consultant profile: {e}")
             
         try:
             if hasattr(user, 'admission_official_profile') and user.admission_official_profile:

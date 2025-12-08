@@ -18,7 +18,7 @@ from datetime import datetime
 router = APIRouter()
 
 def check_view_permission(current_user: entities.Users = Depends(get_current_user)):
-    """Check if user has permission to view training questions (Admin, Consultant, or Admission)"""
+    """Check if user has permission to view training questions (Admin, Consultant, or Admission Official)"""
     if not current_user:
         raise HTTPException(status_code=403, detail="Not authenticated")
 
@@ -27,13 +27,18 @@ def check_view_permission(current_user: entities.Users = Depends(get_current_use
     except AttributeError:
         user_perms_list = [p.lower() for p in current_user.permissions]
 
-    is_admin_or_consultant = "admin" in user_perms_list or "consultant" in user_perms_list
-    is_admission_related = any("admission" in p for p in user_perms_list)
+    # Check for Admin, Consultant, or Admission Official permissions
+    is_admin = "admin" in user_perms_list
+    is_consultant = "consultant" in user_perms_list
+    is_admission_official = any(
+        "admission" in p or "admission official" in p 
+        for p in user_perms_list
+    )
 
-    if not (is_admin_or_consultant or is_admission_related):
+    if not (is_admin or is_consultant or is_admission_official):
         raise HTTPException(
             status_code=403,
-            detail="Admin, Consultant, or Admission permission required"
+            detail="Admin, Consultant, or Admission Official permission required"
         )
     
     return current_user

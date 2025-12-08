@@ -26,7 +26,7 @@ class Users(Base):
 
     # permissions (many-to-many)
     user_permissions = relationship('UserPermission', back_populates='user', cascade="all, delete-orphan")
-    permissions = relationship('Permission', secondary='UserPermission', back_populates='users')
+    permissions = relationship('Permission', secondary='UserPermission', back_populates='users', overlaps="user,user_permissions")
 
     # 1-1 profiles
     customer_profile = relationship('CustomerProfile', back_populates='user', uselist=False)
@@ -82,7 +82,7 @@ class Permission(Base):
     
     # Relationships
     user_permissions = relationship('UserPermission', back_populates='permission', cascade="all, delete-orphan")
-    users = relationship('Users', secondary='UserPermission', back_populates='permissions')
+    users = relationship('Users', secondary='UserPermission', back_populates='permissions', overlaps="user,user_permissions")
 
 
 class Role(Base):
@@ -483,4 +483,3 @@ class Article(Base):
     author_user = relationship('Users', back_populates='articles')
     major = relationship('Major', back_populates='articles')
     specialization = relationship('Specialization', back_populates='articles')
-# ---------------------------------------------------------------------

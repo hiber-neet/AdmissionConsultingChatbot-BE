@@ -222,7 +222,6 @@ class TrainingService:
 
         Nhiệm vụ: Dựa trên "cuộc hội thoại gần đây" và "phản hồi mới nhất của người dùng", bạn hãy đảm bảo tạo ra **một câu truy vấn tìm kiếm**, rõ ràng, cụ thể (bằng tiếng Việt), thể hiện đúng ý định của người dùng để gửi cho chatbot rag tư vấn để nó có thể hiểu yêu cầu của người dùng. "Chỉ tạo truy vấn nếu phản hồi của người dùng là phần tiếp nối hoặc làm rõ nội dung trong hội thoại trước đó.", nếu phản hồi của người dùng không trả lời hoặc không liên quan cho cuộc hội thoại gần đây thì hãy trả về y nguyên phản hồi mới nhất của người dùng.
 
-      
         """
         # assume async predict exists
         enriched = await self.llm.ainvoke(prompt)
@@ -437,6 +436,7 @@ class TrainingService:
             mem_vars = memory.load_memory_variables({})
             chat_history = mem_vars.get("chat_history", "")
             """Stream phản hồi từ Gemini, từng chunk một."""
+
             prompt = f"""Bạn là một chatbot tư vấn tuyển sinh chuyên nghiệp của trường đại học FPT
             Đây là đoạn hội thoại trước: 
             {chat_history}
@@ -448,7 +448,9 @@ class TrainingService:
             - Trả lời bằng tiếng Việt
             - Thân thiện, chuyên nghiệp
             - Dựa vào thông tin tham khảo trên được cung cấp
+
             - Bạn là chatbot tư vấn tuyển sinh của trường đại học FPT, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
+
             - Nếu không tìm thấy thông tin, hãy nói rõ và gợi ý liên hệ trực tiếp nhân viên tư vấn
             - Không bịa thêm thông tin ngoài context
             - Nếu câu hỏi chỉ là chào hỏi, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
