@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List
 from langchain_google_genai import GoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters  import RecursiveCharacterTextSplitter
 from langchain_classic.memory import ConversationBufferMemory
 from qdrant_client import QdrantClient
@@ -19,15 +20,15 @@ memory_service = MemoryManager()
 
 class TrainingService:
     def __init__(self):
-        self.gemini_api_key = os.getenv("GEMINI_API_KEY")
-        self.llm = GoogleGenerativeAI(
-            model="gemini-2.0-flash",
-            google_api_key=self.gemini_api_key,
+        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        self.llm = ChatOpenAI(
+            model="gpt-4.1-mini",
+            api_key=self.openai_api_key,
             temperature=0.7
         )
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-                    model="models/gemini-embedding-001",
-                    google_api_key=self.gemini_api_key
+        self.embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-large",
+            api_key=self.openai_api_key
         )
         self.qdrant_client = QdrantClient(
             host=os.getenv("QDRANT_HOST", "localhost"),
@@ -399,8 +400,9 @@ class TrainingService:
             """
             full_response = ""
             async for chunk in self.llm.astream(prompt):
-                yield chunk
-                full_response += chunk
+                text = chunk.content or ""
+                full_response += text
+                yield text
                 await asyncio.sleep(0)  # Nhường event loop
             memory.save_context({"input": query}, {"output": full_response})  
             
@@ -471,8 +473,9 @@ class TrainingService:
             """
             full_response = ""
             async for chunk in self.llm.astream(prompt):
-                yield chunk
-                full_response += chunk 
+                text = chunk.content or ""
+                full_response += text
+                yield text
                 await asyncio.sleep(0)  # Nhường event loop
 
             memory.save_context({"input": query}, {"output": full_response})  
@@ -569,8 +572,9 @@ class TrainingService:
         """
             full_response = ""
             async for chunk in self.llm.astream(prompt):
-                yield chunk
-                full_response += chunk 
+                text = chunk.content or ""
+                full_response += text
+                yield text
                 await asyncio.sleep(0)  # Nhường event loop
 
             memory.save_context({"input": query}, {"output": full_response})  
