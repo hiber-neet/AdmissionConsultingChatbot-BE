@@ -36,7 +36,7 @@ services:
 
   # --- 2. PostgreSQL Service ---
   db:
-    image: postgres:latest
+    image: postgres:15-alpine
     container_name: postgres-db
     ports:
       - "5432:5432"
@@ -61,12 +61,12 @@ services:
     networks:
       - chatbot_net
     restart: always
-  # --- 4. pgAdmin Service (MỚI THÊM) ---
+  # --- 4. pgAdmin Service ---
   pgadmin:
     image: dpage/pgadmin4
     container_name: pgadmin_gui
     ports:
-      - "5050:80" # Mapping port 5050 máy bạn vào port 80 container
+      - "5050:80" # Mapping port 5050 máy local vào port 80 container
     environment:
       - PGADMIN_DEFAULT_EMAIL=admin@gmail.com
       - PGADMIN_DEFAULT_PASSWORD=1234
