@@ -66,7 +66,17 @@ class TrainingService:
         Returns:
             session_id: ID của session vừa tạo
         """
+        
         db = SessionLocal()
+        if not user_id:
+            session = ChatSession(
+                session_type=session_type,
+                start_time=datetime.now()
+            )
+            db.add(session)
+            db.flush()
+            db.commit()
+            return session.chat_session_id
         try:
             session = ChatSession(
                 session_type=session_type,
@@ -174,15 +184,15 @@ class TrainingService:
 
         Nhiệm vụ: Dựa trên "cuộc hội thoại gần đây" và "phản hồi mới nhất của người dùng", bạn hãy đảm bảo tạo ra **một câu truy vấn tìm kiếm**, rõ ràng, cụ thể (bằng tiếng Việt), thể hiện đúng ý định của người dùng để gửi cho chatbot rag tư vấn để nó có thể hiểu yêu cầu của người dùng. "Chỉ tạo truy vấn nếu phản hồi của người dùng là phần tiếp nối hoặc làm rõ nội dung trong hội thoại trước đó.", nếu phản hồi của người dùng không trả lời hoặc không liên quan cho cuộc hội thoại gần đây thì hãy trả về y nguyên phản hồi mới nhất của người dùng.
 
-        Chỉ trả về **một dòng truy vấn duy nhất** (không thêm nội dung khác).  
-        Ví dụ:
-        - "Thông tin về ngành Công nghệ Thông tin tại trường XYZ"  
-        - "Học phí ngành CNTT hệ chính quy năm 2025 tại trường XYZ"
+      
         """
         # assume async predict exists
         enriched = await self.llm.ainvoke(prompt)
+        print("==== RAW RESPONSE ====")
+        print(enriched.content)
+        print("======================")
         # fallback: if empty use original
-        enriched_txt = (enriched or "").strip().splitlines()[0] if enriched else user_message
+        enriched_txt = (enriched.content or "").strip().splitlines()[0] if enriched else user_message
         return enriched_txt   
 
     # ---------------------------
@@ -200,9 +210,9 @@ class TrainingService:
         Hoặc có thể trả về "true" nếu câu hỏi tìm kiếm chỉ là lời chào.
         """
         res = await self.llm.ainvoke(prompt)
-        if not res:
+        if not res.content:
             return False
-        r = res.strip().lower()
+        r = res.content.strip().lower()
         return ("đúng" in r) or ("true" in r) or (r.startswith("đúng")) or (r.startswith("true"))
 
     async def llm_document_recommendation_check(self, enriched_query: str, context: str) -> bool:
@@ -238,7 +248,7 @@ class TrainingService:
         """
 
         res = await self.llm.ainvoke(prompt)
-        r = res.strip().lower()
+        r = res.content.strip().lower()
         if r not in ["document", "recommendation", "nope"]:
             r = "nope"
         return r
@@ -260,9 +270,9 @@ class TrainingService:
         """
 
         res = await self.llm.ainvoke(prompt)
-        if not res:
+        if not res.content:
             return False
-        r = res.strip().lower()
+        r = res.content.strip().lower()
         return ("đúng" in r) or ("true" in r) or (r.startswith("đúng")) or (r.startswith("true"))
 
     async def response_from_riasec_result(self, riasec_result: schemas.RiasecResultCreate):
@@ -289,7 +299,7 @@ class TrainingService:
 
         try:
             res = await self.llm.ainvoke(prompt)
-            return res.strip()
+            return res.content.strip()
 
         except Exception as e:
             print("LLM error:", e)
@@ -357,27 +367,39 @@ class TrainingService:
             print(f"Error updating FaqStatistics: {e}")
             
 
-    async def stream_response_from_context(self, query: str, context: str, session_id: int = 1, user_id: int = 1, intent_id: int = 1):
+    async def stream_response_from_context(self, query: str, context: str, session_id: int, user_id: int, intent_id: int):
         db = SessionLocal()
         
         try:
-            # 🧩 1. Lưu tin nhắn người dùng
-            user_msg = ChatInteraction(
-                message_text=query,
-                timestamp=datetime.now(),
-                rating=None,
-                is_from_bot=False,
-                sender_id=user_id,
-                session_id=session_id
-            )
-            db.add(user_msg)
-            db.flush()  # flush để lấy ID nếu cần liên kết sau
-        
+            if user_id:
+                # 🧩 1. Lưu tin nhắn người dùng
+                user_msg = ChatInteraction(
+                    message_text=query,
+                    timestamp=datetime.now(),
+                    rating=None,
+                    is_from_bot=False,
+                    sender_id=None,
+                    session_id=session_id
+                )
+                db.add(user_msg)
+                db.flush()  # flush để lấy ID nếu cần liên kết sau
+            else:
+                # 🧩 1. Lưu tin nhắn người dùng
+                user_msg = ChatInteraction(
+                    message_text=query,
+                    timestamp=datetime.now(),
+                    rating=None,
+                    is_from_bot=False,
+                    sender_id=user_id,
+                    session_id=session_id
+                )
+                db.add(user_msg)
+                db.flush()  # flush để lấy ID nếu cần liên kết sau
             memory = memory_service.get_memory(session_id)
             mem_vars = memory.load_memory_variables({})
             chat_history = mem_vars.get("chat_history", "")
             """Stream phản hồi từ Gemini, từng chunk một."""
-            prompt = f"""Bạn là một chatbot tư vấn tuyển sinh chuyên nghiệp của trường XYZ
+            prompt = f"""Bạn là một chatbot tư vấn tuyển sinh chuyên nghiệp của trường đại học FPT
             Đây là đoạn hội thoại trước: 
             {chat_history}
             === THÔNG TIN THAM KHẢO ===
@@ -388,7 +410,7 @@ class TrainingService:
             - Trả lời bằng tiếng Việt
             - Thân thiện, chuyên nghiệp
             - Dựa vào thông tin tham khảo trên được cung cấp
-            - Bạn là chatbot tư vấn tuyển sinh của trường xyz, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
+            - Bạn là chatbot tư vấn tuyển sinh của trường đại học FPT, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
             - Nếu không tìm thấy thông tin, hãy nói rõ và gợi ý liên hệ trực tiếp nhân viên tư vấn
             - Không bịa thêm thông tin ngoài context
             - Nếu câu hỏi chỉ là chào hỏi, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
@@ -432,23 +454,36 @@ class TrainingService:
     async def stream_response_from_qa(self, query: str, context: str, session_id: int = 1, user_id: int = 1, intent_id: int = 1):
         db = SessionLocal()
         try:
-            # 🧩 1. Lưu tin nhắn người dùng
-            user_msg = ChatInteraction(
-                message_text=query,
-                timestamp=datetime.now(),
-                rating=None,
-                is_from_bot=False,
-                sender_id=user_id,
-                session_id=session_id
-            )
-            db.add(user_msg)
-            db.flush()  # flush để lấy ID nếu cần liên kết sau
+            if user_id:
+                # 🧩 1. Lưu tin nhắn người dùng
+                user_msg = ChatInteraction(
+                    message_text=query,
+                    timestamp=datetime.now(),
+                    rating=None,
+                    is_from_bot=False,
+                    sender_id=None,
+                    session_id=session_id
+                )
+                db.add(user_msg)
+                db.flush()  # flush để lấy ID nếu cần liên kết sau
+            else:
+                # 🧩 1. Lưu tin nhắn người dùng
+                user_msg = ChatInteraction(
+                    message_text=query,
+                    timestamp=datetime.now(),
+                    rating=None,
+                    is_from_bot=False,
+                    sender_id=user_id,
+                    session_id=session_id
+                )
+                db.add(user_msg)
+                db.flush()  # flush để lấy ID nếu cần liên kết sau
             memory = memory_service.get_memory(session_id)
             mem_vars = memory.load_memory_variables({})
             chat_history = mem_vars.get("chat_history", "")
 
             prompt = f"""
-            Bạn là chatbot tư vấn tuyển sinh của trường XYZ.
+            Bạn là chatbot tư vấn tuyển sinh của trường đại học FPT.
             Đây là đoạn hội thoại trước: 
             {chat_history}
             === CÂU TRẢ LỜI CHÍNH THỨC ===
@@ -462,7 +497,7 @@ class TrainingService:
             - Nếu phần CÂU TRẢ LỜI CHÍNH THỨC không liên quan rõ ràng đến câu hỏi, **đừng cố trả lời theo context** mà hãy nói:
             “Hiện chưa có thông tin chính xác cho câu hỏi này. Bạn có thể nói rõ chi tiết hơn được không?” 
             - Nếu phần trả lời chính thức không phù hợp với câu hỏi, hãy nói “Hiện chưa có thông tin cho câu hỏi này. Vui lòng liên hệ chuyên viên tư vấn.”
-            - Bạn là chatbot tư vấn tuyển sinh của trường xyz, nhớ kiểm tra kĩ rõ ràng câu hỏi, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
+            - Bạn là chatbot tư vấn tuyển sinh của trường đại học FPT, nhớ kiểm tra kĩ rõ ràng câu hỏi, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
             - Nếu câu hỏi chỉ là chào hỏi, hỏi thời tiết, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
             - Nếu câu hỏi quá mơ hồ, hãy hỏi lại để rõ hơn và chi tiết hơn về câu hỏi
             - Có thể **diễn đạt lại câu hỏi hoặc thông tin** một cách nhẹ nhàng, tự nhiên để người dùng dễ hiểu hơn, **nhưng tuyệt đối không thay đổi ý nghĩa hay thêm dữ kiện mới.**
@@ -510,17 +545,30 @@ class TrainingService:
     ):
         db = SessionLocal()
         try:
-            # 🧩 1. Lưu tin nhắn người dùng
-            user_msg = ChatInteraction(
-                message_text=query,
-                timestamp=datetime.now(),
-                rating=None,
-                is_from_bot=False,
-                sender_id=user_id,
-                session_id=session_id
-            )
-            db.add(user_msg)
-            db.flush()  # flush để lấy ID nếu cần liên kết sau
+            if user_id:
+                # 🧩 1. Lưu tin nhắn người dùng
+                user_msg = ChatInteraction(
+                    message_text=query,
+                    timestamp=datetime.now(),
+                    rating=None,
+                    is_from_bot=False,
+                    sender_id=None,
+                    session_id=session_id
+                )
+                db.add(user_msg)
+                db.flush()  # flush để lấy ID nếu cần liên kết sau
+            else:
+                # 🧩 1. Lưu tin nhắn người dùng
+                user_msg = ChatInteraction(
+                    message_text=query,
+                    timestamp=datetime.now(),
+                    rating=None,
+                    is_from_bot=False,
+                    sender_id=user_id,
+                    session_id=session_id
+                )
+                db.add(user_msg)
+                db.flush()  # flush để lấy ID nếu cần liên kết sau
             memory = memory_service.get_memory(session_id)
             mem_vars = memory.load_memory_variables({})
             chat_history = mem_vars.get("chat_history", "")
@@ -538,7 +586,7 @@ class TrainingService:
                 maj_texts.append(f"- [{m['major_id']}]: {m['major_name']}")
 
             prompt = f"""
-        Bạn là chatbot tư vấn tuyển sinh của trường đại học XYZ. Nhiệm vụ của bạn là tư vấn chọn ngành:
+        Bạn là chatbot tư vấn tuyển sinh của trường đại học FPT. Nhiệm vụ của bạn là tư vấn chọn ngành:
         **CHỈ tư vấn chọn ngành khi câu hỏi của người dùng thật sự liên quan.**
         
         Đây là đoạn hội thoại trước: 

@@ -21,10 +21,7 @@ async def websocket_chat(websocket: WebSocket):
     user_id = data.get("user_id")
     session_id = data.get("session_id")
    
-    if not user_id:
-        await websocket.send_json({"event": "error", "message": "Missing user_id"})
-        await websocket.close()
-        return
+    
 
     if not session_id:
         session_id = service.create_chat_session(user_id, "chatbot")
@@ -35,7 +32,7 @@ async def websocket_chat(websocket: WebSocket):
 
     # 2️⃣ Sau khi nhận xong → gửi lời chào
     greeting_chunks = [
-        "Chào bạn! 👋 Mình là Chatbot tư vấn tuyển sinh của trường XYZ.",
+        "Chào bạn! 👋 Mình là Chatbot tư vấn tuyển sinh của trường đại học FPT.",
         "Rất vui được đồng hành cùng bạn!\nMình có thể giúp bạn:",
         "\n\n1️⃣ Giới thiệu ngành học, chương trình đào tạo.",
         "\n\n2️⃣ Tư vấn lộ trình học tập và cơ hội nghề nghiệp.",
