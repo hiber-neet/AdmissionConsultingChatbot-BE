@@ -35,7 +35,7 @@ async def websocket_chat(websocket: WebSocket):
 
     # 2️⃣ Sau khi nhận xong → gửi lời chào
     greeting_chunks = [
-        "Chào bạn! 👋 Mình là Chatbot tư vấn tuyển sinh của trường XYZ.",
+        "Chào bạn! 👋 Mình là Chatbot tư vấn tuyển sinh của trường FPT.",
         "Rất vui được đồng hành cùng bạn!\nMình có thể giúp bạn:",
         "\n\n1️⃣ Giới thiệu ngành học, chương trình đào tạo.",
         "\n\n2️⃣ Tư vấn lộ trình học tập và cơ hội nghề nghiệp.",

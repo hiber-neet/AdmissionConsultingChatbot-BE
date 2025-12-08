@@ -176,8 +176,8 @@ class TrainingService:
 
         Chỉ trả về **một dòng truy vấn duy nhất** (không thêm nội dung khác).  
         Ví dụ:
-        - "Thông tin về ngành Công nghệ Thông tin tại trường XYZ"  
-        - "Học phí ngành CNTT hệ chính quy năm 2025 tại trường XYZ"
+        - "Thông tin về ngành Công nghệ Thông tin tại trường FPT"  
+        - "Học phí ngành CNTT hệ chính quy năm 2025 tại trường FPT"
         """
         # assume async predict exists
         enriched = await self.llm.ainvoke(prompt)
@@ -377,7 +377,7 @@ class TrainingService:
             mem_vars = memory.load_memory_variables({})
             chat_history = mem_vars.get("chat_history", "")
             """Stream phản hồi từ Gemini, từng chunk một."""
-            prompt = f"""Bạn là một chatbot tư vấn tuyển sinh chuyên nghiệp của trường XYZ
+            prompt = f"""Bạn là một chatbot tư vấn tuyển sinh chuyên nghiệp của trường FPT
             Đây là đoạn hội thoại trước: 
             {chat_history}
             === THÔNG TIN THAM KHẢO ===
@@ -388,7 +388,7 @@ class TrainingService:
             - Trả lời bằng tiếng Việt
             - Thân thiện, chuyên nghiệp
             - Dựa vào thông tin tham khảo trên được cung cấp
-            - Bạn là chatbot tư vấn tuyển sinh của trường xyz, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
+            - Bạn là chatbot tư vấn tuyển sinh của trường FPT, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
             - Nếu không tìm thấy thông tin, hãy nói rõ và gợi ý liên hệ trực tiếp nhân viên tư vấn
             - Không bịa thêm thông tin ngoài context
             - Nếu câu hỏi chỉ là chào hỏi, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
@@ -448,7 +448,7 @@ class TrainingService:
             chat_history = mem_vars.get("chat_history", "")
 
             prompt = f"""
-            Bạn là chatbot tư vấn tuyển sinh của trường XYZ.
+            Bạn là chatbot tư vấn tuyển sinh của trường FPT.
             Đây là đoạn hội thoại trước: 
             {chat_history}
             === CÂU TRẢ LỜI CHÍNH THỨC ===
@@ -462,7 +462,7 @@ class TrainingService:
             - Nếu phần CÂU TRẢ LỜI CHÍNH THỨC không liên quan rõ ràng đến câu hỏi, **đừng cố trả lời theo context** mà hãy nói:
             “Hiện chưa có thông tin chính xác cho câu hỏi này. Bạn có thể nói rõ chi tiết hơn được không?” 
             - Nếu phần trả lời chính thức không phù hợp với câu hỏi, hãy nói “Hiện chưa có thông tin cho câu hỏi này. Vui lòng liên hệ chuyên viên tư vấn.”
-            - Bạn là chatbot tư vấn tuyển sinh của trường xyz, nhớ kiểm tra kĩ rõ ràng câu hỏi, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
+            - Bạn là chatbot tư vấn tuyển sinh của trường FPT, nhớ kiểm tra kĩ rõ ràng câu hỏi, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
             - Nếu câu hỏi chỉ là chào hỏi, hỏi thời tiết, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
             - Nếu câu hỏi quá mơ hồ, hãy hỏi lại để rõ hơn và chi tiết hơn về câu hỏi
             - Có thể **diễn đạt lại câu hỏi hoặc thông tin** một cách nhẹ nhàng, tự nhiên để người dùng dễ hiểu hơn, **nhưng tuyệt đối không thay đổi ý nghĩa hay thêm dữ kiện mới.**
@@ -538,7 +538,7 @@ class TrainingService:
                 maj_texts.append(f"- [{m['major_id']}]: {m['major_name']}")
 
             prompt = f"""
-        Bạn là chatbot tư vấn tuyển sinh của trường đại học XYZ. Nhiệm vụ của bạn là tư vấn chọn ngành:
+        Bạn là chatbot tư vấn tuyển sinh của trường đại học FPT. Nhiệm vụ của bạn là tư vấn chọn ngành:
         **CHỈ tư vấn chọn ngành khi câu hỏi của người dùng thật sự liên quan.**
         
         Đây là đoạn hội thoại trước: 
