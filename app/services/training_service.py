@@ -745,7 +745,8 @@ class TrainingService:
             question=question_text,
             answer=answer_text,
             intent_id=1,
-            created_by=1
+            created_by=1,
+            status='draft'  # New Q&A starts as draft, needs review before training
         )
         db.add(new_qa)
         db.commit()

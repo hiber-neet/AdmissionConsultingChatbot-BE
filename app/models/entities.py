@@ -35,7 +35,17 @@ class Users(Base):
     admission_official_profile = relationship('AdmissionOfficialProfile', back_populates='user', uselist=False)
 
     # documents / knowledge base
-    knowledge_documents = relationship('KnowledgeBaseDocument', back_populates='author', cascade="all, delete-orphan")
+    knowledge_documents = relationship(
+        'KnowledgeBaseDocument', 
+        foreign_keys='[KnowledgeBaseDocument.created_by]',
+        back_populates='author', 
+        cascade="all, delete-orphan"
+    )
+    reviewed_knowledge_documents = relationship(
+        'KnowledgeBaseDocument',
+        foreign_keys='[KnowledgeBaseDocument.reviewed_by]',
+        back_populates='reviewer'
+    )
     document_chunks = relationship('DocumentChunk', back_populates='created_by_user', cascade="all, delete-orphan")
 
     # templates & articles & admissions
@@ -358,9 +368,12 @@ class TrainingQuestionAnswer(Base):
     question_id = Column(Integer, primary_key=True, autoincrement=True)
     question = Column(String)
     answer = Column(String)
+    status = Column(String, default="draft")  # Values: draft, approved, rejected, deleted
     intent_id = Column(Integer, ForeignKey("Intent.intent_id"))
+    created_at = Column(Date, default=datetime.now, nullable=True)
     created_by = Column(Integer, ForeignKey("Users.user_id"))
-    approved_by = Column(Integer, ForeignKey("Users.user_id"))
+    approved_by = Column(Integer, ForeignKey("Users.user_id"), nullable=True)
+    approved_at = Column(Date, nullable=True)
     
     # Relationships
     intent = relationship("Intent", back_populates="training_questions")
@@ -399,13 +412,17 @@ class KnowledgeBaseDocument(Base):
     title = Column(String)
     file_path = Column(String)
     category = Column(String)
+    status = Column(String, default="draft")  # Values: draft, approved, rejected, deleted
     created_at = Column(Date, default=datetime.now)
     updated_at = Column(Date, onupdate=datetime.now)
     created_by = Column(Integer, ForeignKey('Users.user_id'))
+    reviewed_by = Column(Integer, ForeignKey('Users.user_id'), nullable=True)
+    reviewed_at = Column(Date, nullable=True)
     
     # Relationships
     chunks = relationship('DocumentChunk', back_populates='document', cascade="all, delete-orphan")
-    author = relationship('Users', back_populates='knowledge_documents')
+    author = relationship('Users', foreign_keys=[created_by], back_populates='knowledge_documents')
+    reviewer = relationship('Users', foreign_keys=[reviewed_by], back_populates='reviewed_knowledge_documents')
     
 
 class DocumentChunk(Base):
@@ -424,31 +441,33 @@ class DocumentChunk(Base):
 # ---------------------------------------------------------------------
 
 
-# -------------------- Template & Template_Field ----------------------
+# -------------------- Template & Template_QA ----------------------
 class Template(Base):
     __tablename__ = 'Template'
     
     template_id = Column(Integer, primary_key=True, autoincrement=True)
     template_name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     created_by = Column(Integer, ForeignKey('Users.user_id'))
     
     # Relationships
-    template_fields = relationship('Template_Field', back_populates='template', cascade="all, delete-orphan")
+    qa_pairs = relationship('Template_QA', back_populates='template', cascade="all, delete-orphan")
     creator = relationship('Users', back_populates='templates')
 
 
-class Template_Field(Base):
-    __tablename__ = 'Template_Field'
+class Template_QA(Base):
+    """Template Q&A pairs for consultants to use as examples when creating training questions"""
+    __tablename__ = 'Template_QA'
     
-    template_field_id = Column(Integer, primary_key=True, autoincrement=True)
-    field_name = Column(String)
-    order_field = Column(Integer)
-    field_type = Column(String)
+    qa_id = Column(Integer, primary_key=True, autoincrement=True)
     template_id = Column(Integer, ForeignKey("Template.template_id"))
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    order_position = Column(Integer, default=0)
     
     # Relationships
-    template = relationship('Template', back_populates='template_fields')
+    template = relationship('Template', back_populates='qa_pairs')
 # ---------------------------------------------------------------------
 
 

@@ -185,7 +185,8 @@ def login(
         )
     if not user.status:
         raise HTTPException(
-            status_code=400, detail="Inactive user"
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Your account has been deactivated. Please contact the administrator."
         )
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)

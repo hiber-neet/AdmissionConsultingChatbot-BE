@@ -1,0 +1,15 @@
+PLACEHOLDER FILE
+================
+
+This is a placeholder file created automatically because the original file
+uploaded from another developer's machine is not available locally.
+
+Document Title: aa
+Original Path: uploads/6520d5b6-e2ec-4f15-b4b7-2b2bf43d49a4_sqlScript.txt
+
+To get the actual file:
+1. Ask your team member who uploaded it to share it
+2. Set up a shared storage system (e.g., Git LFS, AWS S3, Google Drive)
+3. Or sync the uploads/ folder across all development machines
+
+This placeholder allows the application to continue working without errors.

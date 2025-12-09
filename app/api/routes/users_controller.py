@@ -5,6 +5,7 @@ from app.models.schemas import (
     PermissionChangeRequest,
     PermissionRevokeRequest,
     BanUserRequest,
+    UserUpdate,
 )
 from app.models.entities import Users, UserPermission, Permission
 from app.core.security import has_permission, get_current_user, is_admin_or_admission_official
@@ -219,79 +220,106 @@ def revoke_permission(
     current_user: Users = Depends(get_current_user)
 ):
     """Revoke one or more permissions from a user (admin only). Admins cannot revoke permissions from other admins."""
-    if not current_user or not has_permission(current_user, "admin"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin permission required")
+    try:
+        if not current_user or not has_permission(current_user, "admin"):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin permission required")
 
-    # find target user
-    target = db.query(Users).filter(Users.user_id == payload.user_id).first()
-    if not target:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
+        # find target user
+        target = db.query(Users).filter(Users.user_id == payload.user_id).first()
+        if not target:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
 
-    # Determine if target has admin permission
-    from app.models.entities import Permission as PermissionModel
-    target_has_admin = any(p.permission_name and "admin" in p.permission_name.lower() for p in target.permissions or [])
-    if target_has_admin and target.user_id != current_user.user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify permissions of another admin")
+        # Determine if target has admin permission
+        from app.models.entities import Permission as PermissionModel
+        target_has_admin = any(p.permission_name and "admin" in p.permission_name.lower() for p in target.permissions or [])
+        if target_has_admin and target.user_id != current_user.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot modify permissions of another admin")
 
-    requested_ids = list(dict.fromkeys(payload.permission_ids or []))
-    if not requested_ids:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No permission ids provided")
+        requested_ids = list(dict.fromkeys(payload.permission_ids or []))
+        if not requested_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No permission ids provided")
 
-    # Validate that the permission ids exist
-    perms = db.query(PermissionModel).filter(PermissionModel.permission_id.in_(requested_ids)).all()
-    found_ids = {p.permission_id for p in perms}
-    missing = [pid for pid in requested_ids if pid not in found_ids]
-    if missing:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"missing_permission_ids": missing})
+        # Validate that the permission ids exist
+        perms = db.query(PermissionModel).filter(PermissionModel.permission_id.in_(requested_ids)).all()
+        found_ids = {p.permission_id for p in perms}
+        missing = [pid for pid in requested_ids if pid not in found_ids]
+        if missing:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"missing_permission_ids": missing})
 
-    removed = []
-    skipped = []
+        removed = []
+        skipped = []
 
-    # find existing UserPermission rows for requested ids
-    ups = db.query(UserPermission).filter(
-        UserPermission.user_id == target.user_id,
-        UserPermission.permission_id.in_(requested_ids)
-    ).all()
-    existing_ids = {u.permission_id for u in ups}
-    skipped = [pid for pid in requested_ids if pid not in existing_ids]
+        # find existing UserPermission rows for requested ids
+        ups = db.query(UserPermission).filter(
+            UserPermission.user_id == target.user_id,
+            UserPermission.permission_id.in_(requested_ids)
+        ).all()
+        existing_ids = {u.permission_id for u in ups}
+        skipped = [pid for pid in requested_ids if pid not in existing_ids]
 
-    # import profile models
-    from app.models.entities import ConsultantProfile as ConsultantProfileModel
-    from app.models.entities import ContentManagerProfile as ContentManagerProfileModel
-    from app.models.entities import AdmissionOfficialProfile as AdmissionOfficialProfileModel
+        # import profile models
+        from app.models.entities import ConsultantProfile as ConsultantProfileModel
+        from app.models.entities import ContentManagerProfile as ContentManagerProfileModel
+        from app.models.entities import AdmissionOfficialProfile as AdmissionOfficialProfileModel
 
-    # delete found links
-    for u in ups:
-        db.delete(u)
-        removed.append(u.permission_id)
+        # delete found links
+        for u in ups:
+            db.delete(u)
+            removed.append(u.permission_id)
 
-    db.flush()
+        db.flush()
 
-    # After removals, recompute remaining permissions to decide profile cleanup
-    remaining_perms = db.query(PermissionModel).join(UserPermission).filter(UserPermission.user_id == target.user_id).all()
-    remaining_names = {(p.permission_name or "").lower() for p in remaining_perms}
+        # After removals, recompute remaining permissions to decide profile cleanup
+        remaining_perms = db.query(PermissionModel).join(UserPermission).filter(UserPermission.user_id == target.user_id).all()
+        remaining_names = {(p.permission_name or "").lower() for p in remaining_perms}
 
-    # Clean profiles if no remaining related permissions
-    if not any("consultant" in name for name in remaining_names):
-        cp = db.query(ConsultantProfileModel).filter(ConsultantProfileModel.consultant_id == target.user_id).first()
-        if cp:
-            db.delete(cp)
-    if not any("content" in name for name in remaining_names):
-        cmp = db.query(ContentManagerProfileModel).filter(ContentManagerProfileModel.content_manager_id == target.user_id).first()
-        if cmp:
-            db.delete(cmp)
-    if not any(("admission" in name) or ("official" in name) for name in remaining_names):
-        ap = db.query(AdmissionOfficialProfileModel).filter(AdmissionOfficialProfileModel.admission_official_id == target.user_id).first()
-        if ap:
-            db.delete(ap)
+        # Clean profiles if no remaining related permissions
+        if not any("consultant" in name for name in remaining_names):
+            cp = db.query(ConsultantProfileModel).filter(ConsultantProfileModel.consultant_id == target.user_id).first()
+            if cp:
+                db.delete(cp)
+        if not any("content" in name for name in remaining_names):
+            cmp = db.query(ContentManagerProfileModel).filter(ContentManagerProfileModel.content_manager_id == target.user_id).first()
+            if cmp:
+                db.delete(cmp)
+        if not any(("admission" in name) or ("official" in name) for name in remaining_names):
+            ap = db.query(AdmissionOfficialProfileModel).filter(AdmissionOfficialProfileModel.admission_official_id == target.user_id).first()
+            if ap:
+                # Check if there are any live chat queue entries referencing this officer
+                from app.models.entities import LiveChatQueue
+                active_queues = db.query(LiveChatQueue).filter(
+                    LiveChatQueue.admission_official_id == target.user_id
+                ).count()
+                
+                if active_queues > 0:
+                    db.rollback()
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot revoke admission officer permission: This user has {active_queues} active or pending live chat queue entries. Please resolve these queue entries first."
+                    )
+                
+                db.delete(ap)
 
-    # If user has no remaining permissions, set status to False (ban)
-    remaining = db.query(UserPermission).filter(UserPermission.user_id == target.user_id).all()
-    if not remaining:
-        target.status = False
+        # If user has no remaining permissions, set status to False (ban)
+        remaining = db.query(UserPermission).filter(UserPermission.user_id == target.user_id).all()
+        if not remaining:
+            target.status = False
 
-    db.commit()
-    return {"removed": removed, "skipped": skipped}
+        db.commit()
+        return {"removed": removed, "skipped": skipped}
+    
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"Error in revoke_permission: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Failed to revoke permissions: {str(e)}"
+        )
 
 
 @router.put("/permissions/update")
@@ -373,6 +401,24 @@ def ban_user(
     if target_is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot ban another admin")
 
+    # Check if user is an admission officer with active queue entries
+    from app.models.entities import AdmissionOfficialProfile, LiveChatQueue
+    admission_profile = db.query(AdmissionOfficialProfile).filter(
+        AdmissionOfficialProfile.admission_official_id == target.user_id
+    ).first()
+    
+    if admission_profile:
+        # Check for any live chat queue entries
+        active_queues = db.query(LiveChatQueue).filter(
+            LiveChatQueue.admission_official_id == target.user_id
+        ).count()
+        
+        if active_queues > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot ban this admission officer: They have {active_queues} active or pending live chat queue entries. Please resolve these queue entries first."
+            )
+
     target.status = False
     db.commit()
     return {"message": "User has been banned"}
@@ -400,3 +446,102 @@ def unban_user(
     target.status = True
     db.commit()
     return {"message": "User has been unbanned"}
+
+
+@router.put("/{user_id}")
+def update_user(
+    user_id: int,
+    user_update: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user)
+):
+    """
+    Update user basic information (admin only).
+    Can update: full_name, email, phone_number, password, status.
+    Cannot modify another admin's information unless updating own profile.
+    """
+    if not current_user or not has_permission(current_user, "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin permission required"
+        )
+
+    # Find target user
+    target = db.query(Users).options(
+        selectinload(Users.permissions),
+        selectinload(Users.role)
+    ).filter(Users.user_id == user_id).first()
+    
+    if not target:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    # Prevent modifying another admin (unless it's yourself)
+    target_is_admin = any(
+        p.permission_name and "admin" in p.permission_name.lower() 
+        for p in (target.permissions or [])
+    )
+    if target_is_admin and target.user_id != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot modify another admin's information"
+        )
+
+    # Check if email is being changed and if it's already taken
+    if user_update.email and user_update.email != target.email:
+        existing_user = db.query(Users).filter(
+            Users.email == user_update.email,
+            Users.user_id != user_id
+        ).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
+
+    # Update fields that are provided
+    update_data = user_update.dict(exclude_unset=True)
+    
+    # Check if status is being changed to False (ban) for admission officer with active queues
+    if "status" in update_data and update_data["status"] == False:
+        from app.models.entities import AdmissionOfficialProfile, LiveChatQueue
+        admission_profile = db.query(AdmissionOfficialProfile).filter(
+            AdmissionOfficialProfile.admission_official_id == target.user_id
+        ).first()
+        
+        if admission_profile:
+            active_queues = db.query(LiveChatQueue).filter(
+                LiveChatQueue.admission_official_id == target.user_id
+            ).count()
+            
+            if active_queues > 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Cannot deactivate this admission officer: They have {active_queues} active or pending live chat queue entries. Please resolve these queue entries first."
+                )
+    
+    # Handle password hashing if password is being updated
+    if "password" in update_data and update_data["password"]:
+        from app.core.security import get_password_hash
+        update_data["password"] = get_password_hash(update_data["password"])
+    
+    # Apply updates
+    for field, value in update_data.items():
+        setattr(target, field, value)
+
+    db.commit()
+    db.refresh(target)
+
+    # Return updated user info
+    return {
+        "user_id": target.user_id,
+        "full_name": target.full_name,
+        "email": target.email,
+        "phone_number": target.phone_number,
+        "status": target.status,
+        "role_id": target.role_id,
+        "role_name": target.role.role_name if target.role else None,
+        "message": "User updated successfully"
+    }
