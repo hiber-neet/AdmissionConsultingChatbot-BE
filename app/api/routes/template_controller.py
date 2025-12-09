@@ -29,18 +29,19 @@ def create_template(
     
     db_template = entities.Template(
         template_name=template.template_name,
+        description=template.description,
         created_by=current_user.user_id,
         is_active=True
     )
     db.add(db_template)
     db.flush()  # Use flush to get the template_id before committing
 
-    for field_data in template.template_fields:
-        db_field = entities.Template_Field(
-            **field_data.dict(),
+    for qa_data in template.qa_pairs:
+        db_qa = entities.Template_QA(
+            **qa_data.dict(),
             template_id=db_template.template_id
         )
-        db.add(db_field)
+        db.add(db_qa)
     
     db.commit()
     db.refresh(db_template)
@@ -106,20 +107,20 @@ def update_template(
     
     update_data = template.dict(exclude_unset=True)
     
-    if "template_fields" in update_data:
-        # Clear existing fields
-        for field in db_template.template_fields:
-            db.delete(field)
+    if "qa_pairs" in update_data:
+        # Clear existing Q&A pairs
+        for qa in db_template.qa_pairs:
+            db.delete(qa)
             
-        # Add new fields
-        for field_data in update_data["template_fields"]:
-            db_field = entities.Template_Field(
-                **field_data,
+        # Add new Q&A pairs
+        for qa_data in update_data["qa_pairs"]:
+            db_qa = entities.Template_QA(
+                **qa_data,
                 template_id=db_template.template_id
             )
-            db.add(db_field)
+            db.add(db_qa)
             
-        del update_data["template_fields"]
+        del update_data["qa_pairs"]
 
     for key, value in update_data.items():
         setattr(db_template, key, value)

@@ -73,7 +73,7 @@ async def get_knowledge_gaps(
             desc('frequency')
         ).limit(20).all()
         
-        # Get existing training questions with intent information
+        # Get existing training questions with intent information (only approved)
         existing_training = db.query(
             entities.TrainingQuestionAnswer.question,
             entities.TrainingQuestionAnswer.intent_id,
@@ -82,7 +82,8 @@ async def get_knowledge_gaps(
             entities.Intent, 
             entities.TrainingQuestionAnswer.intent_id == entities.Intent.intent_id
         ).filter(
-            entities.TrainingQuestionAnswer.question.isnot(None)
+            entities.TrainingQuestionAnswer.question.isnot(None),
+            entities.TrainingQuestionAnswer.status == 'approved'
         ).all()
         
         existing_q_texts = [q.question.lower().strip() for q in existing_training if q.question]
@@ -309,7 +310,7 @@ async def get_user_questions(
             intent_name = "Uncategorized"
             has_answer = False
             
-            # Look for matching training questions (exact match or similar)
+            # Look for matching training questions (exact match or similar, only approved)
             training_match = (
                 db.query(entities.TrainingQuestionAnswer, entities.Intent.intent_name)
                 .join(entities.Intent, entities.TrainingQuestionAnswer.intent_id == entities.Intent.intent_id)
@@ -317,7 +318,8 @@ async def get_user_questions(
                     or_(
                         entities.TrainingQuestionAnswer.question == q.message_text,
                         entities.TrainingQuestionAnswer.question.ilike(f'%{q.message_text}%')
-                    )
+                    ),
+                    entities.TrainingQuestionAnswer.status == 'approved'
                 )
                 .first()
             )
@@ -781,8 +783,10 @@ async def get_consultant_statistics(
             .all()
         )
         
-        # Get all training questions for comparison
-        training_questions = db.query(entities.TrainingQuestionAnswer.question).all()
+        # Get all training questions for comparison (only approved)
+        training_questions = db.query(entities.TrainingQuestionAnswer.question).filter(
+            entities.TrainingQuestionAnswer.status == 'approved'
+        ).all()
         training_set = {q.question.lower().strip() for q in training_questions if q.question}
         
         # Count knowledge gaps (user questions not in training data)
@@ -1173,13 +1177,15 @@ async def get_admission_dashboard_stats(
                 "articles": count
             })
         
-        # 6. Intent Distribution from Training Questions
+        # 6. Intent Distribution from Training Questions (only approved)
         intent_stats = db.query(
             entities.Intent.intent_name,
             func.count(entities.TrainingQuestionAnswer.question_id).label('count')
         ).join(
             entities.TrainingQuestionAnswer,
             entities.Intent.intent_id == entities.TrainingQuestionAnswer.intent_id
+        ).filter(
+            entities.TrainingQuestionAnswer.status == 'approved'
         ).group_by(
             entities.Intent.intent_name
         ).order_by(
@@ -1224,11 +1230,15 @@ async def get_system_health(
             entities.Article.status == 'published'
         ).count()
         
-        # Total knowledge documents
-        total_kb_docs = db.query(entities.KnowledgeBaseDocument).count()
+        # Total knowledge documents (only approved)
+        total_kb_docs = db.query(entities.KnowledgeBaseDocument).filter(
+            entities.KnowledgeBaseDocument.status == 'approved'
+        ).count()
         
-        # Training QA pairs
-        total_qa_pairs = db.query(entities.TrainingQuestionAnswer).count()
+        # Training QA pairs (only approved)
+        total_qa_pairs = db.query(entities.TrainingQuestionAnswer).filter(
+            entities.TrainingQuestionAnswer.status == 'approved'
+        ).count()
         
         # Recent activity (errors, warnings, etc.)
         recent_failed_interactions = db.query(entities.ChatInteraction).filter(

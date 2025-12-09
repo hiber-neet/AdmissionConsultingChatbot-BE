@@ -89,10 +89,11 @@ class BanUserRequest(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    full_name: Optional[str]
-    email: Optional[EmailStr]
-    password: Optional[str]
-    status: Optional[bool]
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
+    password: Optional[str] = None
+    status: Optional[bool] = None
 
 
 class UserResponse(UserBase):
@@ -303,6 +304,11 @@ class TrainingQuestionRequest(BaseModel):
 
 class TrainingQuestionResponse(TrainingQuestionRequest):
     question_id: int
+    status: Optional[str] = "draft"  # draft, approved, rejected, deleted
+    created_at: Optional[date] = None
+    approved_at: Optional[date] = None
+    created_by: Optional[int] = None
+    approved_by: Optional[int] = None
 
     class Config:
         orm_mode = True
@@ -335,6 +341,9 @@ class KnowledgeBaseDocumentBase(BaseModel):
 
 class KnowledgeBaseDocumentResponse(KnowledgeBaseDocumentBase):
     document_id: int
+    status: Optional[str] = "draft"  # draft, approved, rejected, deleted
+    reviewed_by: Optional[int] = None
+    reviewed_at: Optional[date] = None
 
     class Config:
         orm_mode = True
@@ -480,21 +489,21 @@ class RiasecResult(RiasecResultBase):
         orm_mode = True
 
 # ================= TEMPLATE =================
-class TemplateFieldBase(BaseModel):
-    field_name: str
-    order_field: int
-    field_type: str
+class TemplateQABase(BaseModel):
+    question: str
+    answer: str
+    order_position: int = 0
 
-class TemplateFieldCreate(TemplateFieldBase):
+class TemplateQACreate(TemplateQABase):
     pass
 
-class TemplateFieldUpdate(BaseModel):
-    field_name: Optional[str] = None
-    order_field: Optional[int] = None
-    field_type: Optional[str] = None
+class TemplateQAUpdate(BaseModel):
+    question: Optional[str] = None
+    answer: Optional[str] = None
+    order_position: Optional[int] = None
 
-class TemplateFieldResponse(TemplateFieldBase):
-    template_field_id: int
+class TemplateQAResponse(TemplateQABase):
+    qa_id: int
     template_id: int
 
     class Config:
@@ -503,13 +512,16 @@ class TemplateFieldResponse(TemplateFieldBase):
 
 class TemplateBase(BaseModel):
     template_name: str
+    description: Optional[str] = None
 
 class TemplateCreate(TemplateBase):
-    template_fields: List[TemplateFieldCreate]
+    qa_pairs: List[TemplateQACreate]
 
 class TemplateUpdate(BaseModel):
     template_name: Optional[str] = None
-    template_fields: Optional[List[TemplateFieldUpdate]] = None
+    description: Optional[str] = None
+    qa_pairs: Optional[List[TemplateQAUpdate]] = None
+
 class TemplateDelete(BaseModel):
     template_ids: List[int]
 
@@ -518,7 +530,7 @@ class TemplateResponse(TemplateBase):
     template_id: int
     is_active: bool
     created_by: Optional[int] = None
-    template_fields: List[TemplateFieldResponse] = []
+    qa_pairs: List[TemplateQAResponse] = []
 
     class Config:
         orm_mode = True

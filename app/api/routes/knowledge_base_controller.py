@@ -1,7 +1,7 @@
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, APIRouter, Form
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, APIRouter, Form, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from pathlib import Path
 import os
 import json
@@ -54,10 +54,43 @@ def get_document_or_404(document_id: int, db: Session) -> entities.KnowledgeBase
     
     return document
 
-def check_file_exists(file_path: str):
-    """Helper function to check if file exists on disk or raise 404"""
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found on server")
+def resolve_file_path(relative_path: str) -> Path:
+    """
+    Resolve file path relative to project root, ensuring compatibility across machines.
+    Handles both absolute and relative paths stored in database.
+    """
+    path = Path(relative_path)
+    
+    # If it's already an absolute path, extract just the relative part from 'uploads/'
+    if path.is_absolute():
+        # Find 'uploads' in the path and take everything from there
+        parts = path.parts
+        try:
+            uploads_index = parts.index('uploads')
+            relative_path = str(Path(*parts[uploads_index:]))
+            path = Path(relative_path)
+        except ValueError:
+            # 'uploads' not in path, use as-is
+            pass
+    
+    # If path is not absolute, resolve it relative to current working directory
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    
+    return path
+
+def check_file_exists(file_path: str) -> Path:
+    """
+    Helper function to check if file exists on disk or raise 404.
+    Returns the resolved absolute path.
+    """
+    resolved_path = resolve_file_path(file_path)
+    if not resolved_path.exists():
+        raise HTTPException(
+            status_code=404, 
+            detail=f"File not found on server. Looking for: {resolved_path}"
+        )
+    return resolved_path
 
 @router.post("/upload/document")
 async def upload_document(
@@ -134,7 +167,8 @@ async def upload_document(
             title=title or file.filename,
             file_path=str(file_path),
             category=category or "general",
-            created_by=current_user_id
+            created_by=current_user_id,
+            status='draft'  # New documents start as draft, need review
         )
         db.add(document)
         db.commit()
@@ -212,14 +246,32 @@ async def upload_training_question(payload: TrainingQuestionRequest, db: Session
 
 @router.get("/training_questions", response_model=List[TrainingQuestionResponse])
 def get_all_training_questions(
+    status: Optional[str] = Query(None, description="Filter by status: draft, approved, rejected, deleted"),
     db: Session = Depends(get_db), 
     current_user: entities.Users = Depends(check_view_permission)
 ):
     """
     Get all training questions in the system.
     Requires Admin, Consultant, or Admission permission.
+    
+    - Regular users (Consultant) only see approved questions
+    - Consultant Leader and Admin can see all statuses
+    - Use ?status= query parameter to filter by specific status
     """
-    training_questions = db.query(entities.TrainingQuestionAnswer).all()
+    # Check if user is admin or consultant leader
+    is_admin = current_user.role in ['Admin', 'ConsultantLeader']
+    
+    # Build query
+    query = db.query(entities.TrainingQuestionAnswer)
+    
+    # If not admin/leader, only show approved questions
+    if not is_admin:
+        query = query.filter(entities.TrainingQuestionAnswer.status == 'approved')
+    # If admin/leader and status filter provided, apply it
+    elif status:
+        query = query.filter(entities.TrainingQuestionAnswer.status == status)
+    
+    training_questions = query.all()
     
     # Convert to response format
     result = []
@@ -228,21 +280,44 @@ def get_all_training_questions(
             "question_id": tqa.question_id,
             "question": tqa.question,
             "answer": tqa.answer,
-            "intent_id": tqa.intent_id
+            "intent_id": tqa.intent_id,
+            "status": tqa.status,
+            "created_at": tqa.created_at,
+            "approved_at": tqa.approved_at,
+            "created_by": tqa.created_by,
+            "approved_by": tqa.approved_by
         })
     
     return result
 
 @router.get("/documents", response_model=List[KnowledgeBaseDocumentResponse])
 def get_all_documents(
+    status: Optional[str] = Query(None, description="Filter by status: draft, approved, rejected, deleted"),
     db: Session = Depends(get_db), 
     current_user: entities.Users = Depends(check_view_permission)
 ):
     """
     Get all documents in the knowledge base.
     Requires Admin, Consultant, or Admission permission.
+    
+    - Regular users (Consultant) only see approved documents
+    - Consultant Leader and Admin can see all statuses
+    - Use ?status= query parameter to filter by specific status
     """
-    documents = db.query(entities.KnowledgeBaseDocument).all()
+    # Check if user is admin or consultant leader
+    is_admin = current_user.role in ['Admin', 'ConsultantLeader']
+    
+    # Build query
+    query = db.query(entities.KnowledgeBaseDocument)
+    
+    # If not admin/leader, only show approved documents
+    if not is_admin:
+        query = query.filter(entities.KnowledgeBaseDocument.status == 'approved')
+    # If admin/leader and status filter provided, apply it
+    elif status:
+        query = query.filter(entities.KnowledgeBaseDocument.status == status)
+    
+    documents = query.all()
     
     # Convert to response format
     result = []
@@ -254,7 +329,10 @@ def get_all_documents(
             "category": doc.category,
             "created_at": doc.created_at,
             "updated_at": doc.updated_at,
-            "created_by": doc.created_by
+            "created_by": doc.created_by,
+            "status": doc.status,
+            "reviewed_by": doc.reviewed_by,
+            "reviewed_at": doc.reviewed_at
         })
     
     return result
@@ -270,10 +348,10 @@ def download_document(
     Requires Admin, Consultant, or Admission permission.
     """
     document = get_document_or_404(document_id, db)
-    check_file_exists(document.file_path)
+    resolved_path = check_file_exists(document.file_path)
     
     return FileResponse(
-        path=document.file_path,
+        path=str(resolved_path),
         filename=document.title,
         media_type='application/octet-stream'
     )
@@ -331,5 +409,247 @@ def get_document_by_id(
         "category": document.category,
         "created_at": document.created_at,
         "updated_at": document.updated_at,
-        "created_by": document.created_by
+        "created_by": document.created_by,
+        "status": document.status,
+        "reviewed_by": document.reviewed_by,
+        "reviewed_at": document.reviewed_at
     }
+
+
+# ==================== REVIEW WORKFLOW ENDPOINTS ====================
+
+def check_leader_permission(current_user: entities.Users = Depends(get_current_user)):
+    """Check if user is Admin or ConsultantLeader"""
+    if current_user.role not in ['Admin', 'ConsultantLeader']:
+        raise HTTPException(status_code=403, detail="Only Admin or Consultant Leader can review content")
+    return current_user
+
+
+@router.get("/documents/pending-review", response_model=List[KnowledgeBaseDocumentResponse])
+def get_pending_documents(
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_leader_permission)
+):
+    """
+    Get all documents pending review (status=draft).
+    Only Admin or ConsultantLeader can access this endpoint.
+    """
+    documents = db.query(entities.KnowledgeBaseDocument).filter(
+        entities.KnowledgeBaseDocument.status == 'draft'
+    ).all()
+    
+    return documents
+
+
+@router.post("/documents/{document_id}/submit-review")
+def submit_document_for_review(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_view_permission)
+):
+    """
+    Submit a document for review by changing status to 'draft'.
+    Any consultant can submit their own documents for review.
+    """
+    document = get_document_or_404(document_id, db)
+    
+    # Check if user owns this document
+    if document.created_by != current_user.user_id and current_user.role not in ['Admin', 'ConsultantLeader']:
+        raise HTTPException(status_code=403, detail="You can only submit your own documents for review")
+    
+    document.status = 'draft'
+    db.commit()
+    
+    return {"message": "Document submitted for review successfully", "document_id": document_id}
+
+
+@router.post("/documents/{document_id}/approve")
+def approve_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_leader_permission)
+):
+    """
+    Approve a document for production use.
+    Only Admin or ConsultantLeader can approve documents.
+    """
+    document = get_document_or_404(document_id, db)
+    
+    document.status = 'approved'
+    document.reviewed_by = current_user.user_id
+    document.reviewed_at = datetime.now().date()
+    db.commit()
+    
+    return {
+        "message": "Document approved successfully",
+        "document_id": document_id,
+        "reviewed_by": current_user.user_id
+    }
+
+
+@router.post("/documents/{document_id}/reject")
+def reject_document(
+    document_id: int,
+    reason: str = Form(..., description="Reason for rejection"),
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_leader_permission)
+):
+    """
+    Reject a document with a reason.
+    Only Admin or ConsultantLeader can reject documents.
+    """
+    document = get_document_or_404(document_id, db)
+    
+    document.status = 'rejected'
+    document.reviewed_by = current_user.user_id
+    document.reviewed_at = datetime.now().date()
+    db.commit()
+    
+    # TODO: Consider adding a rejection_reason field to the entity or notification system
+    
+    return {
+        "message": "Document rejected",
+        "document_id": document_id,
+        "reason": reason,
+        "reviewed_by": current_user.user_id
+    }
+
+
+@router.delete("/documents/{document_id}")
+def delete_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_leader_permission)
+):
+    """
+    Soft delete a document by setting status to 'deleted'.
+    Only Admin or ConsultantLeader can delete documents.
+    """
+    document = get_document_or_404(document_id, db)
+    
+    document.status = 'deleted'
+    db.commit()
+    
+    return {"message": "Document deleted successfully", "document_id": document_id}
+
+
+# ==================== TRAINING Q&A REVIEW WORKFLOW ====================
+
+def get_training_qa_or_404(question_id: int, db: Session) -> entities.TrainingQuestionAnswer:
+    """Helper function to get training Q&A or raise 404"""
+    qa = db.query(entities.TrainingQuestionAnswer).filter(
+        entities.TrainingQuestionAnswer.question_id == question_id
+    ).first()
+    
+    if not qa:
+        raise HTTPException(status_code=404, detail=f"Training Q&A with id {question_id} not found")
+    
+    return qa
+
+
+@router.get("/training_questions/pending-review", response_model=List[TrainingQuestionResponse])
+def get_pending_training_questions(
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_leader_permission)
+):
+    """
+    Get all training Q&A pending review (status=draft).
+    Only Admin or ConsultantLeader can access this endpoint.
+    """
+    questions = db.query(entities.TrainingQuestionAnswer).filter(
+        entities.TrainingQuestionAnswer.status == 'draft'
+    ).all()
+    
+    return questions
+
+
+@router.post("/training_questions/{question_id}/submit-review")
+def submit_training_qa_for_review(
+    question_id: int,
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_view_permission)
+):
+    """
+    Submit a training Q&A for review by changing status to 'draft'.
+    Any consultant can submit their own Q&A for review.
+    """
+    qa = get_training_qa_or_404(question_id, db)
+    
+    # Check if user owns this Q&A
+    if qa.created_by != current_user.user_id and current_user.role not in ['Admin', 'ConsultantLeader']:
+        raise HTTPException(status_code=403, detail="You can only submit your own Q&A for review")
+    
+    qa.status = 'draft'
+    db.commit()
+    
+    return {"message": "Training Q&A submitted for review successfully", "question_id": question_id}
+
+
+@router.post("/training_questions/{question_id}/approve")
+def approve_training_qa(
+    question_id: int,
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_leader_permission)
+):
+    """
+    Approve a training Q&A for use in chatbot training.
+    Only Admin or ConsultantLeader can approve Q&A.
+    """
+    qa = get_training_qa_or_404(question_id, db)
+    
+    qa.status = 'approved'
+    qa.approved_by = current_user.user_id
+    qa.approved_at = datetime.now().date()
+    db.commit()
+    
+    return {
+        "message": "Training Q&A approved successfully",
+        "question_id": question_id,
+        "approved_by": current_user.user_id
+    }
+
+
+@router.post("/training_questions/{question_id}/reject")
+def reject_training_qa(
+    question_id: int,
+    reason: str = Form(..., description="Reason for rejection"),
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_leader_permission)
+):
+    """
+    Reject a training Q&A with a reason.
+    Only Admin or ConsultantLeader can reject Q&A.
+    """
+    qa = get_training_qa_or_404(question_id, db)
+    
+    qa.status = 'rejected'
+    qa.approved_by = current_user.user_id
+    qa.approved_at = datetime.now().date()
+    db.commit()
+    
+    # TODO: Consider adding a rejection_reason field or notification system
+    
+    return {
+        "message": "Training Q&A rejected",
+        "question_id": question_id,
+        "reason": reason,
+        "rejected_by": current_user.user_id
+    }
+
+
+@router.delete("/training_questions/{question_id}")
+def delete_training_qa(
+    question_id: int,
+    db: Session = Depends(get_db),
+    current_user: entities.Users = Depends(check_leader_permission)
+):
+    """
+    Soft delete a training Q&A by setting status to 'deleted'.
+    Only Admin or ConsultantLeader can delete Q&A.
+    """
+    qa = get_training_qa_or_404(question_id, db)
+    
+    qa.status = 'deleted'
+    db.commit()
+    
+    return {"message": "Training Q&A deleted successfully", "question_id": question_id}
