@@ -392,21 +392,14 @@ def get_all_training_questions(
     Get all training questions in the system.
     Requires Admin, Consultant, or Admission permission.
     
-    - Regular users (Consultant) only see approved questions
-    - Consultant Leader and Admin can see all statuses
+    - All users can see all questions regardless of status
     - Use ?status= query parameter to filter by specific status
     """
-    # Check if user is admin or consultant leader
-    is_admin = current_user.role in ['Admin', 'ConsultantLeader']
-    
     # Build query
     query = db.query(entities.TrainingQuestionAnswer)
     
-    # If not admin/leader, only show approved questions
-    if not is_admin:
-        query = query.filter(entities.TrainingQuestionAnswer.status == 'approved')
-    # If admin/leader and status filter provided, apply it
-    elif status:
+    # Apply status filter if provided
+    if status:
         query = query.filter(entities.TrainingQuestionAnswer.status == status)
     
     training_questions = query.all()
@@ -438,21 +431,14 @@ def get_all_documents(
     Get all documents in the knowledge base.
     Requires Admin, Consultant, or Admission permission.
     
-    - Regular users (Consultant) only see approved documents
-    - Consultant Leader and Admin can see all statuses
+    - All users can see all documents regardless of status
     - Use ?status= query parameter to filter by specific status
     """
-    # Check if user is admin or consultant leader
-    is_admin = current_user.role in ['Admin', 'ConsultantLeader']
-    
     # Build query
     query = db.query(entities.KnowledgeBaseDocument)
     
-    # If not admin/leader, only show approved documents
-    if not is_admin:
-        query = query.filter(entities.KnowledgeBaseDocument.status == 'approved')
-    # If admin/leader and status filter provided, apply it
-    elif status:
+    # Apply status filter if provided
+    if status:
         query = query.filter(entities.KnowledgeBaseDocument.status == status)
     
     documents = query.all()
@@ -557,8 +543,9 @@ def get_document_by_id(
 # ==================== REVIEW WORKFLOW ENDPOINTS ====================
 
 def check_leader_permission(current_user: entities.Users = Depends(get_current_user)):
-    """Check if user is Admin or ConsultantLeader"""
-    if current_user.role not in ['Admin', 'ConsultantLeader']:
+    """Check if user has Admin or ConsultantLeader permission"""
+    user_perms_list = [p.permission_name.lower() for p in current_user.permissions]
+    if "admin" not in user_perms_list and "consultantleader" not in user_perms_list:
         raise HTTPException(status_code=403, detail="Only Admin or Consultant Leader can review content")
     return current_user
 
@@ -628,12 +615,12 @@ def approve_document(
 @router.post("/documents/{document_id}/reject")
 def reject_document(
     document_id: int,
-    reason: str = Form(..., description="Reason for rejection"),
+    reason: str = Form(None, description="Reason for rejection"),
     db: Session = Depends(get_db),
     current_user: entities.Users = Depends(check_leader_permission)
 ):
     """
-    Reject a document with a reason.
+    Reject a document with an optional reason.
     Only Admin or ConsultantLeader can reject documents.
     """
     document = get_document_or_404(document_id, db)
@@ -750,12 +737,12 @@ def approve_training_qa(
 @router.post("/training_questions/{question_id}/reject")
 def reject_training_qa(
     question_id: int,
-    reason: str = Form(..., description="Reason for rejection"),
+    reason: str = Form(None, description="Reason for rejection"),
     db: Session = Depends(get_db),
     current_user: entities.Users = Depends(check_leader_permission)
 ):
     """
-    Reject a training Q&A with a reason.
+    Reject a training Q&A with an optional reason.
     Only Admin or ConsultantLeader can reject Q&A.
     """
     qa = get_training_qa_or_404(question_id, db)

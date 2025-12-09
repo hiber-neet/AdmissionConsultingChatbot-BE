@@ -20,3 +20,5 @@ test_category_api.py
 test_data_script.py
 test_end_session.py
 switch-env.sh
+TEST_CREDENTIALS.md
+reset_and_populate_db.py
