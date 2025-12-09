@@ -31,6 +31,4 @@ jobs:
           docker compose up -d --build backend
           
           # Hoặc build lại toàn bộ cho chắc: docker compose up -d --build
-          
-          # 5. Dọn rác
-          docker system prune -f
+      
