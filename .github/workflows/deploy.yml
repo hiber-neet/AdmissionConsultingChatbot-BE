@@ -28,7 +28,7 @@ jobs:
           cd ../backend
           
           # 4. Build và chạy lại (Recreate backend containers)
-          docker compose up -d --build backend
+          docker compose up -d --build frontend
           
           # Hoặc build lại toàn bộ cho chắc: docker compose up -d --build
           
