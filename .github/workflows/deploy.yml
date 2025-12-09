@@ -14,7 +14,7 @@ jobs:
         host: ${{ secrets.HOST }}
         username: ${{ secrets.USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
-        command_timeout: 30m
+        command_timeout: 60m
         script: |
           # 1. Update code Backend
           cd ~/app/backend
