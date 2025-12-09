@@ -412,7 +412,7 @@ class KnowledgeBaseDocument(Base):
     title = Column(String)
     file_path = Column(String)
     category = Column(String)
-    intend_id = Column(Intent, ForeignKey('Intent.intent_id'))
+    intend_id = Column(Integer, ForeignKey('Intent.intent_id'))
     status = Column(String, default="draft")  # Values: draft, approved, rejected, deleted
     created_at = Column(Date, default=datetime.now)
     updated_at = Column(Date, onupdate=datetime.now)
