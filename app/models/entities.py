@@ -332,7 +332,7 @@ class Intent(Base):
     
     faq_statistics = relationship('FaqStatistics', back_populates='intent', cascade="all, delete-orphan")
     training_questions = relationship('TrainingQuestionAnswer', back_populates='intent', cascade="all, delete-orphan")
-
+    document = relationship('KnowledgeBaseDocument', back_populates='intent', cascade="all, delete-orphan")
 
 class FaqStatistics(Base):
     __tablename__ = 'FaqStatistics'
@@ -412,6 +412,7 @@ class KnowledgeBaseDocument(Base):
     title = Column(String)
     file_path = Column(String)
     category = Column(String)
+    intend_id = Column(Intent, ForeignKey('Intent.intent_id'))
     status = Column(String, default="draft")  # Values: draft, approved, rejected, deleted
     created_at = Column(Date, default=datetime.now)
     updated_at = Column(Date, onupdate=datetime.now)
@@ -419,6 +420,7 @@ class KnowledgeBaseDocument(Base):
     reviewed_by = Column(Integer, ForeignKey('Users.user_id'), nullable=True)
     reviewed_at = Column(Date, nullable=True)
     
+    intent = relationship('Intent', back_populates='document')
     # Relationships
     chunks = relationship('DocumentChunk', back_populates='document', cascade="all, delete-orphan")
     author = relationship('Users', foreign_keys=[created_by], back_populates='knowledge_documents')

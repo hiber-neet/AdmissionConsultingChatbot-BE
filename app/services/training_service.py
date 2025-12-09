@@ -9,7 +9,7 @@ import uuid
 import asyncio
 from sqlalchemy.orm import Session
 from app.models import schemas
-from app.models.entities import AcademicScore, ChatInteraction, ChatSession, FaqStatistics, Major, ParticipateChatSession, RiasecResult, TrainingQuestionAnswer
+from app.models.entities import AcademicScore, ChatInteraction, ChatSession, DocumentChunk, FaqStatistics, KnowledgeBaseDocument, Major, ParticipateChatSession, RiasecResult, TrainingQuestionAnswer
 from app.models.database import SessionLocal
 from sqlalchemy.exc import SQLAlchemyError
 from app.services.memory_service import MemoryManager
@@ -688,20 +688,114 @@ class TrainingService:
         finally:
             db.close()
 
-    def add_document(self, document_id: int, content: str, intend_id: int, metadata: dict = None):
+    def create_training_qa(self, db: Session, intent_id: int, question: str, answer: str, created_by: int):
+        qa = TrainingQuestionAnswer(
+            question=question,
+            answer=answer,
+            intent_id=intent_id,
+            created_by=created_by,
+            status="draft"
+        )
+        db.add(qa)
+        db.commit()
+        db.refresh(qa)
+
+        return qa
+
+    def approve_training_qa(self, db: Session, qa_id: int, reviewer_id: int):
+        qa = db.query(TrainingQuestionAnswer).filter_by(question_id=qa_id).first()
+        if not qa:
+            raise Exception("QA not found")
+
+        if qa.status != "draft":
+            raise Exception("Only draft QA can be approved")
+
+        # embed question (answer không embed)
+        embedding = self.embeddings.embed_query(qa.question)
+        point_id = str(uuid.uuid4())
+
+        # push to Qdrant
+        self.qdrant_client.upsert(
+            collection_name="training_qa",
+            points=[
+                PointStruct(
+                    id=point_id,
+                    vector=embedding,
+                    payload={
+                        "question_id": qa.question_id,
+                        "intent_id": qa.intent_id,
+                        "question_text": qa.question,
+                        "answer_text": qa.answer,
+                        "type": "training_qa"
+                    }
+                )
+            ]
+        )
+
+        # update DB
+        qa.status = "approved"
+        qa.approved_by = reviewer_id
+        qa.approved_at = datetime.now()
+        db.commit()
+
+        return {
+            "postgre_question_id": qa.question_id,
+            "qdrant_question_id": point_id
+        }
+
+    def create_document(self, db: Session, title: str, file_path: str, intend_id: int, created_by: int):
+        new_doc = KnowledgeBaseDocument(
+            title=title,
+            file_path=file_path,
+            intend_id=intend_id,
+            status="draft",
+            created_by=created_by,
+        )
+        db.add(new_doc)
+        db.commit()
+        db.refresh(new_doc)
+
+        return new_doc
+
+    def approve_document(self, db: Session, document_id: int, reviewer_id: int, intent_id: int, metadata: dict = None):
+
+        doc = db.query(KnowledgeBaseDocument).filter_by(document_id=document_id).first()
+        if not doc:
+            raise Exception("Document not found")
+
+        if doc.status != "draft":
+            raise Exception("Only draft documents can be approved")
+
+        # Read file content
+        with open(doc.file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # --- Split text ---
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,      # Size optimal cho Vietnamese
-            chunk_overlap=200     # Overlap to preserve context
+            chunk_size=1000,
+            chunk_overlap=200
         )
         chunks = text_splitter.split_text(content)
-        
-        chunk_ids = []
+
+        qdrant_ids = []
+
+        # --- Save chunks to DB & Qdrant ---
         for i, chunk in enumerate(chunks):
-            # Embed chunk
+
+            # Save DocumentChunk in DB
+            db_chunk = DocumentChunk(
+                chunk_text=chunk,
+                document_id=document_id,
+                created_by=reviewer_id
+            )
+            db.add(db_chunk)
+            db.flush()   # get chunk_id
+
+            # Embed
             embedding = self.embeddings.embed_query(chunk)
             point_id = str(uuid.uuid4())
-            
-            # Upsert to Qdrant
+
+            # Push to Qdrant
             self.qdrant_client.upsert(
                 collection_name="knowledge_base_documents",
                 points=[
@@ -712,16 +806,61 @@ class TrainingService:
                             "document_id": document_id,
                             "chunk_index": i,
                             "chunk_text": chunk,
-                            "intend_id": intend_id,
+                            "intent_id": intent_id,
                             "metadata": metadata or {},
                             "type": "document"
                         }
                     )
                 ]
             )
-            chunk_ids.append(point_id)
+
+            qdrant_ids.append(point_id)
+
+        # update document status
+        doc.status = "approved"
+        doc.reviewed_by = reviewer_id
+        doc.reviewed_at = datetime.now()
+        db.commit()
+
+        return {
+            "document_id": document_id,
+            "status": doc.status
+        }
+
+    # def add_document(self, document_id: int, content: str, intend_id: int, metadata: dict = None):
+    #     text_splitter = RecursiveCharacterTextSplitter(
+    #         chunk_size=1000,      # Size optimal cho Vietnamese
+    #         chunk_overlap=200     # Overlap to preserve context
+    #     )
+    #     chunks = text_splitter.split_text(content)
         
-        return chunk_ids
+    #     chunk_ids = []
+    #     for i, chunk in enumerate(chunks):
+    #         # Embed chunk
+    #         embedding = self.embeddings.embed_query(chunk)
+    #         point_id = str(uuid.uuid4())
+            
+    #         # Upsert to Qdrant
+    #         self.qdrant_client.upsert(
+    #             collection_name="knowledge_base_documents",
+    #             points=[
+    #                 PointStruct(
+    #                     id=point_id,
+    #                     vector=embedding,
+    #                     payload={
+    #                         "document_id": document_id,
+    #                         "chunk_index": i,
+    #                         "chunk_text": chunk,
+    #                         "intend_id": intend_id,
+    #                         "metadata": metadata or {},
+    #                         "type": "document"
+    #                     }
+    #                 )
+    #             ]
+    #         )
+    #         chunk_ids.append(point_id)
+        
+    #     return chunk_ids
     
     def add_training_qa(self, db: Session, intent_id: int, question_text: str, answer_text: str):
         """
@@ -783,6 +922,8 @@ class TrainingService:
             "qdrant_question_id": point_id
         }
     
+    
+
     def search_documents(self, query: str, top_k: int = 5):
         """
         Search documents (Fallback)

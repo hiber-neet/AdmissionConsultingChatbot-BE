@@ -91,13 +91,50 @@ def check_file_exists(file_path: str) -> Path:
             detail=f"File not found on server. Looking for: {resolved_path}"
         )
     return resolved_path
+@router.post("/approve/training_question/{qa_id}")
+def api_approve_training_qa(
+    qa_id: int,
+    db: Session = Depends(get_db),
+    reviewer_id: int = 1
+):
+    service = TrainingService()
 
+    result = service.approve_training_qa(
+        db=db,
+        qa_id=qa_id,
+        reviewer_id=reviewer_id
+    )
+
+    return {
+        "message": "Training QA approved",
+        **result
+    }
+@router.post("/upload/training_question")
+def api_create_training_qa(
+    payload: TrainingQuestionRequest,
+    db: Session = Depends(get_db),
+    current_user_id: int = 1
+):
+    service = TrainingService()
+
+    qa = service.create_training_qa(
+        db=db,
+        intent_id=payload.intent_id,
+        question=payload.question,
+        answer=payload.answer,
+        created_by=current_user_id
+    )
+
+    return {
+        "message": "Training QA created as draft",
+        "qa_id": qa.question_id,
+        "status": qa.status
+    }
 @router.post("/upload/document")
 async def upload_document(
     intent_id: int,
     file: UploadFile = File(...),
     title: str = Form(None),
-    category: str = Form(None),
     current_user_id: int = Form(1),
     db: Session = Depends(get_db)
 ):
@@ -112,137 +149,238 @@ async def upload_document(
     # STEP 2: READ FILE
     try:
         file_content = await file.read()
-        
-        # Check file size (max 50MB)
-        max_size = 50 * 1024 * 1024
-        if len(file_content) > max_size:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large. Max size: {max_size / 1024 / 1024}MB"
-            )
-    except HTTPException:
-        raise
+
+        if len(file_content) > 50 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="File too large (max 50MB)")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
-    
-    # STEP 3: EXTRACT TEXT FROM DOCUMENT
+
+    # STEP 3: EXTRACT TEXT
     try:
-        content_text = documentProcessor.extract_text(
+        extracted_text = documentProcessor.extract_text(
             file_content,
             file.filename,
             file.content_type
         )
-        
-        if not content_text or len(content_text.strip()) == 0:
+        if not extracted_text:
             raise HTTPException(
                 status_code=422,
-                detail="Could not extract text from document. File may be empty or corrupted."
+                detail="Cannot extract content from the file"
             )
-    
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Document processing failed: {str(e)}")
-    
+        raise HTTPException(status_code=422, detail=f"Extract error: {str(e)}")
+
     # STEP 4: SAVE FILE TO DISK
     try:
-        # Create uploads directory if it doesn't exist
         upload_dir = Path("uploads")
         upload_dir.mkdir(exist_ok=True)
-        
-        # Generate unique filename to avoid conflicts
+
         unique_filename = f"{uuid.uuid4()}_{file.filename}"
         file_path = upload_dir / unique_filename
-        
-        # Save file to disk
         with open(file_path, "wb") as f:
             f.write(file_content)
-            
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
-
-    # STEP 5: SAVE TO DATABASE
-    try:
-        document = entities.KnowledgeBaseDocument(
-            title=title or file.filename,
-            file_path=str(file_path),
-            category=category or "general",
-            created_by=current_user_id,
-            status='draft'  # New documents start as draft, need review
-        )
-        db.add(document)
-        db.commit()
-        db.refresh(document)
     
-    except Exception as e:
-        db.rollback()
-        # Clean up file if database save fails
-        if file_path.exists():
-            file_path.unlink()
-        raise HTTPException(status_code=500, detail=f"Failed to save document to database: {str(e)}")
-
-    # STEP 6: CHUNK + EMBED + STORE IN QDRANT
+    # STEP 5: SAVE DATABASE ONLY (NO QDRANT)
     try:
         service = TrainingService()
-        chunk_ids = service.add_document(
-            current_user_id,
-            content_text,
-            intent_id,
-            {
-                "type": file.content_type,
-                "filename": file.filename,
-                "document_id": document.document_id
-            }
-        )
-    
-    except Exception as e:
-        # Cleanup if chunking fails
-        db.delete(document)
-        db.commit()
-        if file_path.exists():
-            file_path.unlink()
-        raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
 
-    # STEP 7: SAVE CHUNK REFERENCES (if needed)
-    try:
-        for i, chunk_id in enumerate(chunk_ids):
-            chunk = entities.DocumentChunk(
-                document_id=document.document_id,
-                chunk_text=f"Chunk {i+1}",  # You might want to store actual chunk text
-                embedding_vector=str(chunk_id)  # Store the Qdrant vector ID
-            )
-            db.add(chunk)
-        
-        db.commit()
-    
+        doc = service.create_document(
+            db=db,
+            title=title or file.filename,
+            file_path=str(file_path),       # <-- file text chứ không phải file gốc
+            intend_id=intent_id,
+            created_by=current_user_id
+        )
+
+        # save extracted text for approval stage
+        temp_store_path = f"uploads/temp_text_{doc.document_id}.txt"
+        with open(temp_store_path, "w", encoding="utf-8") as f:
+            f.write(extracted_text)
+
     except Exception as e:
         db.rollback()
-        # Note: We don't delete the document here as it's already useful
-        print(f"Warning: Failed to save chunk references: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"DB error: {str(e)}")
 
-    # SUCCESS
     return {
-        "message": "Document uploaded and indexed successfully",
-        "document_id": document.document_id,
-        "filename": file.filename,
-        "title": document.title,
-        "file_type": Path(file.filename).suffix.lower(),
-        "chunks_created": len(chunk_ids),
-        "original_size_kb": round(len(file_content) / 1024, 2),
-        "extracted_text_length": len(content_text)
+        "message": "Document uploaded as draft. Waiting for approval.",
+        "document_id": doc.document_id,
+        "intend_id": doc.intend_id,
+        "status": doc.status
     }
-
-@router.post("/upload/training_question")
-async def upload_training_question(payload: TrainingQuestionRequest, db: Session = Depends(get_db), current_user_id: int = 1):
+@router.post("/document/approve/{document_id}")
+def api_approve_document(
+    document_id: int,
+    intent_id: int,
+    db: Session = Depends(get_db),
+    reviewer_id: int = 1
+):
     service = TrainingService()
-    result = service.add_training_qa(
+
+    result = service.approve_document(
         db=db,
-        intent_id=payload.intent_id,
-        question_text=payload.question,
-        answer_text=payload.answer,
-        
+        document_id=document_id,
+        reviewer_id=reviewer_id,
+        intent_id=intent_id
     )
-    return {"message": "Training Q&A added successfully", "result": result}
+
+    return {
+        "message": "Document approved and indexed",
+        "document_id": result.get("document_id"),
+        "status": result.get("status")
+    }
+# @router.post("/upload/document")
+# async def upload_document(
+#     intent_id: int,
+#     file: UploadFile = File(...),
+#     title: str = Form(None),
+#     category: str = Form(None),
+#     current_user_id: int = Form(1),
+#     db: Session = Depends(get_db)
+# ):
+#     # STEP 1: VALIDATE FILE
+#     try:
+#         is_valid, error_msg = documentProcessor.validate_file(file.filename, file.content_type)
+#         if not is_valid:
+#             raise HTTPException(status_code=400, detail=error_msg)
+#     except Exception as e:
+#         raise HTTPException(status_code=400, detail=str(e))
+    
+#     # STEP 2: READ FILE
+#     try:
+#         file_content = await file.read()
+        
+#         # Check file size (max 50MB)
+#         max_size = 50 * 1024 * 1024
+#         if len(file_content) > max_size:
+#             raise HTTPException(
+#                 status_code=413,
+#                 detail=f"File too large. Max size: {max_size / 1024 / 1024}MB"
+#             )
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
+    
+#     # STEP 3: EXTRACT TEXT FROM DOCUMENT
+#     try:
+#         content_text = documentProcessor.extract_text(
+#             file_content,
+#             file.filename,
+#             file.content_type
+#         )
+        
+#         if not content_text or len(content_text.strip()) == 0:
+#             raise HTTPException(
+#                 status_code=422,
+#                 detail="Could not extract text from document. File may be empty or corrupted."
+#             )
+    
+#     except ValueError as e:
+#         raise HTTPException(status_code=400, detail=str(e))
+#     except Exception as e:
+#         raise HTTPException(status_code=422, detail=f"Document processing failed: {str(e)}")
+    
+#     # STEP 4: SAVE FILE TO DISK
+#     try:
+#         # Create uploads directory if it doesn't exist
+#         upload_dir = Path("uploads")
+#         upload_dir.mkdir(exist_ok=True)
+        
+#         # Generate unique filename to avoid conflicts
+#         unique_filename = f"{uuid.uuid4()}_{file.filename}"
+#         file_path = upload_dir / unique_filename
+        
+#         # Save file to disk
+#         with open(file_path, "wb") as f:
+#             f.write(file_content)
+            
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+#     # STEP 5: SAVE TO DATABASE
+#     try:
+#         document = entities.KnowledgeBaseDocument(
+#             title=title or file.filename,
+#             file_path=str(file_path),
+#             category=category or "general",
+#             created_by=current_user_id,
+#             status='draft'  # New documents start as draft, need review
+#         )
+#         db.add(document)
+#         db.commit()
+#         db.refresh(document)
+    
+#     except Exception as e:
+#         db.rollback()
+#         # Clean up file if database save fails
+#         if file_path.exists():
+#             file_path.unlink()
+#         raise HTTPException(status_code=500, detail=f"Failed to save document to database: {str(e)}")
+
+#     # STEP 6: CHUNK + EMBED + STORE IN QDRANT
+#     try:
+#         service = TrainingService()
+#         chunk_ids = service.add_document(
+#             current_user_id,
+#             content_text,
+#             intent_id,
+#             {
+#                 "type": file.content_type,
+#                 "filename": file.filename,
+#                 "document_id": document.document_id
+#             }
+#         )
+    
+#     except Exception as e:
+#         # Cleanup if chunking fails
+#         db.delete(document)
+#         db.commit()
+#         if file_path.exists():
+#             file_path.unlink()
+#         raise HTTPException(status_code=500, detail=f"Failed to process document: {str(e)}")
+
+#     # STEP 7: SAVE CHUNK REFERENCES (if needed)
+#     try:
+#         for i, chunk_id in enumerate(chunk_ids):
+#             chunk = entities.DocumentChunk(
+#                 document_id=document.document_id,
+#                 chunk_text=f"Chunk {i+1}",  # You might want to store actual chunk text
+#                 embedding_vector=str(chunk_id)  # Store the Qdrant vector ID
+#             )
+#             db.add(chunk)
+        
+#         db.commit()
+    
+#     except Exception as e:
+#         db.rollback()
+#         # Note: We don't delete the document here as it's already useful
+#         print(f"Warning: Failed to save chunk references: {str(e)}")
+
+#     # SUCCESS
+#     return {
+#         "message": "Document uploaded and indexed successfully",
+#         "document_id": document.document_id,
+#         "filename": file.filename,
+#         "title": document.title,
+#         "file_type": Path(file.filename).suffix.lower(),
+#         "chunks_created": len(chunk_ids),
+#         "original_size_kb": round(len(file_content) / 1024, 2),
+#         "extracted_text_length": len(content_text)
+#     }
+
+# @router.post("/upload/training_question")
+# async def upload_training_question(payload: TrainingQuestionRequest, db: Session = Depends(get_db), current_user_id: int = 1):
+#     service = TrainingService()
+#     result = service.add_training_qa(
+#         db=db,
+#         intent_id=payload.intent_id,
+#         question_text=payload.question,
+#         answer_text=payload.answer,
+        
+#     )
+#     return {"message": "Training Q&A added successfully", "result": result}
 
 @router.get("/training_questions", response_model=List[TrainingQuestionResponse])
 def get_all_training_questions(
