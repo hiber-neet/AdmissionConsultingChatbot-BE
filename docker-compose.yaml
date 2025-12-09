@@ -13,7 +13,7 @@ services:
     environment:
       # Kết nối Database (Lưu ý: host là 'db', không phải localhost)
       - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      
+
       # Kết nối Qdrant (Lưu ý: host là 'qdrant')
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
@@ -49,6 +49,15 @@ services:
     networks:
       - chatbot_net
     restart: always
+  frontend:
+    build: ../frontend
+    container_name: react_frontend
+    ports:
+      - "80:80" # Mở cổng 80 ra ngoài internet
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf # Mount file nginx từ backend sang
+    depends_on:
+      - backend
 
   # --- 3. Qdrant Service (Vector DB) ---
   qdrant:
@@ -82,9 +91,7 @@ services:
 volumes:
   postgres_data:
   qdrant_storage:
-  pgadmin_data:
-# Định nghĩa Network riêng
+  pgadmin_data: # Định nghĩa Network riêng
 networks:
   chatbot_net:
     driver: bridge
-  
