@@ -46,7 +46,7 @@ async def websocket_chat(websocket: WebSocket):
         await websocket.send_json({"event": "chunk", "content": chunk})
         await asyncio.sleep(0.05)
 
-    await websocket.send_json({"event": "done", "sources": [], "confidence": 1.0})
+    await websocket.send_json({"event": "go", "sources": [], "confidence": 1.0})
  
     try:
         while True:
