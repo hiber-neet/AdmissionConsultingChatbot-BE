@@ -89,7 +89,7 @@ async def websocket_chat(websocket: WebSocket):
 
                 if relevance_ok:
                     print("floor 1: training QA valid")
-                    async for chunk in service.stream_response_from_qa(enriched_query, a_text, intent_id):
+                    async for chunk in service.stream_response_from_qa(enriched_query, a_text, intent_id, message):
                         await websocket.send_text(json.dumps({
                             "event": "chunk",
                             "content": getattr(chunk, "content", str(chunk))
@@ -124,7 +124,7 @@ async def websocket_chat(websocket: WebSocket):
                 check = await service.llm_document_recommendation_check(enriched_query, context)
                 if check == "document":
                     async for chunk in service.stream_response_from_context(
-                        enriched_query, context, session_id, user_id, intent_id
+                        enriched_query, context, session_id, user_id, intent_id, message
                     ):
                         await websocket.send_text(json.dumps({
                             "event": "chunk",
@@ -150,7 +150,7 @@ async def websocket_chat(websocket: WebSocket):
                 print("floor 4: using recommendation layer")
                    
                 async for chunk in service.stream_response_from_recommendation(
-                    user_id, session_id, enriched_query
+                    user_id, session_id, enriched_query, message
                 ):
                     await websocket.send_text(json.dumps({
                         "event": "chunk",

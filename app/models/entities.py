@@ -255,7 +255,11 @@ class Major(Base):
     
     admission_forms = relationship('AdmissionForm', back_populates='major', cascade="all, delete-orphan")
     articles = relationship('Article', back_populates='major', cascade="all, delete-orphan")
-
+    specializations = relationship(
+    'Specialization',
+    back_populates='major',
+    cascade="all, delete-orphan")
+            
 
 class AdmissionForm(Base):
     __tablename__ = 'AdmissionForm'
@@ -482,7 +486,7 @@ class Specialization(Base):
     major_id = Column(Integer, ForeignKey('Major.major_id'), nullable=True)
     
     articles = relationship('Article', back_populates='specialization', cascade="all, delete-orphan")
-
+    major = relationship('Major', back_populates='specializations')
 
 class Article(Base):
     __tablename__ = "Article"

@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_text_splitters  import RecursiveCharacterTextSplitter
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, models
 from qdrant_client.models import Distance, VectorParams, PointStruct
 import os
 import uuid
@@ -13,6 +13,7 @@ from app.models.entities import AcademicScore, ChatInteraction, ChatSession, Doc
 from app.models.database import SessionLocal
 from sqlalchemy.exc import SQLAlchemyError
 from app.services.memory_service import MemoryManager
+from app.utils.document_processor import DocumentProcessor
 
 memory_service = MemoryManager()
 
@@ -328,7 +329,7 @@ class TrainingService:
         1. Tự xác định mã RIASEC chính của người dùng bằng cách chọn 3 nhóm có điểm cao nhất (ví dụ: “ISA”, “REI”, “SEC”…).
         2. Giải thích ý nghĩa mã RIASEC đó theo phong cách hướng nghiệp.
         3. Tóm tắt đặc điểm tính cách chính (3–5 câu).
-        4. Viết súc tích, dễ hiểu, không dùng markdown và chỉ trả về duy nhất một đoạn văn.
+        4. Trả lời bằng tiếng Việt, sử dụng Markdown (tiêu đề, gạch đầu dòng, xuống dòng rõ ràng).
 
         Trả về:
         - Một đoạn văn hoàn chỉnh, bao gồm cả mã RIASEC mà bạn suy luận.
@@ -404,14 +405,14 @@ class TrainingService:
             print(f"Error updating FaqStatistics: {e}")
             
 
-    async def stream_response_from_context(self, query: str, context: str, session_id: int, user_id: int, intent_id: int):
+    async def stream_response_from_context(self, query: str, context: str, session_id: int, user_id: int, intent_id: int, message: str):
         db = SessionLocal()
         
         try:
             if user_id:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
-                    message_text=query,
+                    message_text=message,
                     timestamp=datetime.now(),
                     rating=None,
                     is_from_bot=False,
@@ -423,7 +424,7 @@ class TrainingService:
             else:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
-                    message_text=query,
+                    message_text=message,
                     timestamp=datetime.now(),
                     rating=None,
                     is_from_bot=False,
@@ -435,9 +436,9 @@ class TrainingService:
             memory = memory_service.get_memory(session_id)
             mem_vars = memory.load_memory_variables({})
             chat_history = mem_vars.get("chat_history", "")
-            """Stream phản hồi từ Gemini, từng chunk một."""
+            
 
-            prompt = f"""Bạn là một chatbot tư vấn tuyển sinh chuyên nghiệp của trường đại học FPT
+            prompt = f"""Bạn là một tư vấn viên tuyển sinh chuyên nghiệp của trường đại học FPT
             Đây là đoạn hội thoại trước: 
             {chat_history}
             === THÔNG TIN THAM KHẢO ===
@@ -446,15 +447,13 @@ class TrainingService:
             {query}
             === HƯỚNG DẪN ===
             - Trả lời bằng tiếng Việt
-            - Thân thiện, chuyên nghiệp
             - Dựa vào thông tin tham khảo trên được cung cấp
-
-            - Bạn là chatbot tư vấn tuyển sinh của trường đại học FPT, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
-
+            - Trả lời theo định dạng Markdown: dùng tiêu đề ##, gạch đầu dòng -, xuống dòng rõ ràng.
+            - Hãy tạo ra câu trả lời không quá dài, gói gọn ý chính, chỉ khi câu hỏi yêu cầu "chi tiết" thì mới tạo câu trả lời đầy đủ
+            - Bạn là tư vấn tuyển sinh của trường đại học FPT, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
             - Nếu không tìm thấy thông tin, hãy nói rõ và gợi ý liên hệ trực tiếp nhân viên tư vấn
-            - Không bịa thêm thông tin ngoài context
+            - Không cần phải chào hỏi mỗi lần trả lời, vào thẳng vấn đề chính
             - Nếu câu hỏi chỉ là chào hỏi, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
-            - Có thể **diễn đạt lại câu hỏi hoặc thông tin** một cách nhẹ nhàng, tự nhiên để người dùng dễ hiểu hơn, **nhưng tuyệt đối không thay đổi ý nghĩa hay thêm dữ kiện mới.**
             - Khi có thể, hãy **giải thích thêm bối cảnh hoặc gợi ý bước tiếp theo**, ví dụ:  
                 “Bạn muốn mình gửi danh sách ngành đào tạo kèm chuyên ngành chi tiết không?”  
                 hoặc  
@@ -466,6 +465,7 @@ class TrainingService:
                 full_response += text
                 yield text
                 await asyncio.sleep(0)  # Nhường event loop
+            print(full_response)
             memory.save_context({"input": query}, {"output": full_response})  
             
             # === 🔥 Lưu bot response vào DB ===
@@ -491,13 +491,13 @@ class TrainingService:
         finally:
             db.close()
 
-    async def stream_response_from_qa(self, query: str, context: str, session_id: int = 1, user_id: int = 1, intent_id: int = 1):
+    async def stream_response_from_qa(self, query: str, context: str, session_id: int = 1, user_id: int = 1, intent_id: int = 1, message: str = ""):
         db = SessionLocal()
         try:
             if user_id:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
-                    message_text=query,
+                    message_text=message,
                     timestamp=datetime.now(),
                     rating=None,
                     is_from_bot=False,
@@ -509,7 +509,7 @@ class TrainingService:
             else:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
-                    message_text=query,
+                    message_text=message,
                     timestamp=datetime.now(),
                     rating=None,
                     is_from_bot=False,
@@ -537,8 +537,11 @@ class TrainingService:
             - Nếu phần CÂU TRẢ LỜI CHÍNH THỨC không liên quan rõ ràng đến câu hỏi, **đừng cố trả lời theo context** mà hãy nói:
             “Hiện chưa có thông tin chính xác cho câu hỏi này. Bạn có thể nói rõ chi tiết hơn được không?” 
             - Nếu phần trả lời chính thức không phù hợp với câu hỏi, hãy nói “Hiện chưa có thông tin cho câu hỏi này. Vui lòng liên hệ chuyên viên tư vấn.”
+            - Trả lời theo định dạng Markdown: dùng tiêu đề ##, gạch đầu dòng -, xuống dòng rõ ràng.
+            - Hãy tạo ra câu trả lời không quá dài, gói gọn ý chính, chỉ khi câu hỏi yêu cầu "chi tiết" thì mới tạo câu trả lời đầy đủ
             - Bạn là chatbot tư vấn tuyển sinh của trường đại học FPT, nhớ kiểm tra kĩ rõ ràng câu hỏi, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
             - Nếu câu hỏi chỉ là chào hỏi, hỏi thời tiết, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
+            - Không cần phải chào hỏi mỗi lần trả lời, vào thẳng vấn đề chính
             - Nếu câu hỏi quá mơ hồ, hãy hỏi lại để rõ hơn và chi tiết hơn về câu hỏi
             - Có thể **diễn đạt lại câu hỏi hoặc thông tin** một cách nhẹ nhàng, tự nhiên để người dùng dễ hiểu hơn, **nhưng tuyệt đối không thay đổi ý nghĩa hay thêm dữ kiện mới.**
             - Khi có thể, hãy **giải thích thêm bối cảnh hoặc gợi ý bước tiếp theo**, ví dụ:  
@@ -581,14 +584,15 @@ class TrainingService:
         self,
         user_id: int,
         session_id: int,
-        query: str
+        query: str,
+        message: str
     ):
         db = SessionLocal()
         try:
             if user_id:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
-                    message_text=query,
+                    message_text=message,
                     timestamp=datetime.now(),
                     rating=None,
                     is_from_bot=False,
@@ -600,7 +604,7 @@ class TrainingService:
             else:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
-                    message_text=query,
+                    message_text=message,
                     timestamp=datetime.now(),
                     rating=None,
                     is_from_bot=False,
@@ -614,16 +618,21 @@ class TrainingService:
             chat_history = mem_vars.get("chat_history", "")
 
             user_profile = self._get_user_personality_and_academics(user_id, db)
-            majors = self._get_all_majors_from_db(db, limit=200)
+            majors = self._get_all_majors_and_specialization_from_db(db, limit=200)
 
             personality = user_profile.get("personality_summary") or ""
             academic_summary = user_profile.get("academic_summary") or ""
             gpa = user_profile.get("gpa", "")
 
-            # Rút gọn danh sách ngành
             maj_texts = []
             for m in majors:
-                maj_texts.append(f"- [{m['major_id']}]: {m['major_name']}")
+                line = f"- [{m['major_id']}]: {m['major_name']}"
+                
+                if m["specializations"]:
+                    for s in m["specializations"]:
+                        line += f"\n    • {s['specialization_name']}"
+                
+                maj_texts.append(line)
 
             prompt = f"""
         Bạn là chatbot tư vấn tuyển sinh của trường đại học FPT. Nhiệm vụ của bạn là tư vấn chọn ngành:
@@ -655,8 +664,9 @@ class TrainingService:
         1. **Đầu tiên, hãy kiểm tra xem câu hỏi có thật sự liên quan đến việc tư vấn chọn ngành hay không, hoặc câu hỏi có liên quan đến thông tin hồ sơ người dùng hay không.**
         - Nếu KHÔNG liên quan → bạn hãy tự tạo câu phản hồi phù hợp với CÂU HỎI NGƯỜI DÙNG
         2. Nếu câu hỏi có liên quan đến thông tin hồ sơ người dùng ở trên bao gồm RIASEC Result và học bạ mà hồ sơ người dùng trống thì hãy yêu cầu người dùng nhập những thông tin này như RIASEC Result hoặc học bạ, 1 trong 2 là có thể được tư vấn dựa vào thông tin hồ sơ người dùng. Đề xuất theo tính cách có thể dựa vào kết quả RIASEC Result của THÔNG TIN HỒ SƠ NGƯỜI DÙNG
-        3. Nếu câu hỏi không liên quan thì hãy từ chối yêu cầu và đề nghị nhắn trực tiếp bên tuyển sinh
-    
+        3. Trả lời theo định dạng Markdown: dùng tiêu đề ##, gạch đầu dòng -, xuống dòng rõ ràng.
+        4. Nếu câu hỏi không liên quan thì hãy từ chối yêu cầu và đề nghị nhắn trực tiếp bên tuyển sinh
+        5. Không cần phải chào hỏi mỗi lần trả lời, vào thẳng vấn đề chính
         """
             full_response = ""
             async for chunk in self.llm.astream(prompt):
@@ -743,6 +753,33 @@ class TrainingService:
             "qdrant_question_id": point_id
         }
 
+    def delete_training_qa(self, db: Session, qa_id: int):
+        
+        qa = db.query(TrainingQuestionAnswer).filter_by(question_id=qa_id).first()
+        if not qa:
+            raise Exception("Training QA not found")
+
+        # Xóa vector trong Qdrant
+        self.qdrant_client.delete(
+            collection_name="training_qa",
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="question_id",
+                            match=models.MatchValue(qa_id)
+                        )
+                    ]
+                )
+            )
+        )
+
+        # Xóa trong DB
+        db.delete(qa)
+        db.commit()
+
+        return {"deleted_question_id": qa_id}
+
     def create_document(self, db: Session, title: str, file_path: str, intend_id: int, created_by: int):
         new_doc = KnowledgeBaseDocument(
             title=title,
@@ -766,10 +803,29 @@ class TrainingService:
         if doc.status != "draft":
             raise Exception("Only draft documents can be approved")
 
-        # Read file content
-        with open(doc.file_path, "r", encoding="utf-8") as f:
-            content = f.read()
+        abs_path = os.path.abspath(doc.file_path)
+        print("OPEN FILE:", abs_path)
 
+        with open(abs_path, "rb") as f:
+            file_bytes = f.read()
+
+        # 3. Detect MIME type từ extension (DocumentProcessor cần)
+        mime_map = {
+            ".pdf":  "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".doc":  "application/msword",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".xls":  "application/vnd.ms-excel",
+            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".txt":  "text/plain",
+        }
+        ext = os.path.splitext(doc.file_path)[1].lower()
+        mime_type = mime_map.get(ext, "text/plain")
+        content = DocumentProcessor.extract_text(
+        file_content=file_bytes,
+        filename=os.path.basename(doc.file_path),
+        mime_type=mime_type
+        )
         # --- Split text ---
         text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
@@ -782,14 +838,14 @@ class TrainingService:
         # --- Save chunks to DB & Qdrant ---
         for i, chunk in enumerate(chunks):
 
-            # Save DocumentChunk in DB
-            db_chunk = DocumentChunk(
-                chunk_text=chunk,
-                document_id=document_id,
-                created_by=reviewer_id
-            )
-            db.add(db_chunk)
-            db.flush()   # get chunk_id
+            # # Save DocumentChunk in DB
+            # db_chunk = DocumentChunk(
+            #     chunk_text=chunk,
+            #     document_id=document_id,
+            #     created_by=reviewer_id
+            # )
+            # db.add(db_chunk)
+            # db.flush()   # get chunk_id
 
             # Embed
             embedding = self.embeddings.embed_query(chunk)
@@ -826,6 +882,39 @@ class TrainingService:
             "document_id": document_id,
             "status": doc.status
         }
+
+    def delete_document(self, db: Session, document_id: int):
+        doc = db.query(KnowledgeBaseDocument).filter_by(document_id=document_id).first()
+        if not doc:
+            raise Exception("Document not found")
+
+        # Xóa sạch vector trong Qdrant
+        self.qdrant_client.delete(
+            collection_name="knowledge_base_documents",
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="document_id",
+                            match=models.MatchValue(document_id)
+                        )
+                    ]
+                )
+            )
+        )
+
+        # Xóa chunks trong DB
+        dl = db.query(DocumentChunk).filter_by(document_id=document_id)
+        if dl:
+            dl.delete()
+        # Xóa document trong DB
+        db.delete(doc)
+        db.commit()
+
+        return {"deleted_document_id": document_id}
+    
+
+
 
     # def add_document(self, document_id: int, content: str, intend_id: int, metadata: dict = None):
     #     text_splitter = RecursiveCharacterTextSplitter(
@@ -1012,9 +1101,10 @@ class TrainingService:
         
         # STEP 1: Search training Q&A
         qa_results = self.search_training_qa(query, top_k=3)
-        
-        # TIER 1: Perfect match (score > 0.8)
-        if qa_results and qa_results[0].score > 0.8:
+        print("answer: ")
+        print(qa_results[0].score)
+        # TIER 1: Perfect match (score > 0.7)
+        if qa_results and qa_results[0].score > 0.7:
             top_match = qa_results[0]
             return {
                 "response_official_answer": top_match.payload.get("answer_text"),
@@ -1029,6 +1119,8 @@ class TrainingService:
         
         # TIER 2: No training Q&A match, try documents
         doc_results = self.search_documents(query, top_k=5)
+        print("score document:")
+        print(doc_results[0].score)
         if doc_results and len(doc_results) > 0: 
             return {
                     "response": doc_results,
@@ -1128,6 +1220,32 @@ class TrainingService:
             })
         return majors
 
+    def _get_all_majors_and_specialization_from_db(self, db: Session, limit: int = 200) -> List[Dict[str, Any]]:
+        """
+        Lấy danh sách majors kèm theo danh sách specializations
+        """
+        rows = (
+            db.query(Major)
+            .order_by(Major.major_name)
+            .limit(limit)
+            .all()
+        )
+
+        majors = []
+        for r in rows:
+            majors.append({
+                "major_id": r.major_id,
+                "major_name": r.major_name,
+                "specializations": [
+                    {
+                        "specialization_id": s.specialization_id,
+                        "specialization_name": s.specialization_name
+                    }
+                    for s in r.specializations
+                ]
+            })
+
+        return majors
     
     
 
