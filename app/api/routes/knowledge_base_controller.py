@@ -542,10 +542,31 @@ def get_document_by_id(
 
 # ==================== REVIEW WORKFLOW ENDPOINTS ====================
 
+def is_admin_or_leader(user: entities.Users) -> bool:
+    """Helper function to check if user is Admin or Consultant Leader"""
+    # Get role name from the role relationship
+    role_name = user.role.role_name if user.role else None
+    
+    print(f"DEBUG is_admin_or_leader: user_id={user.user_id}, role_name={role_name}")
+    
+    is_admin = role_name == 'Admin'
+    is_consultant_leader = (
+        role_name == 'Consultant' and 
+        user.consultant_profile is not None and 
+        user.consultant_profile.is_leader
+    )
+    
+    print(f"DEBUG is_admin_or_leader: is_admin={is_admin}, is_consultant_leader={is_consultant_leader}")
+    if role_name == 'Consultant':
+        print(f"DEBUG is_admin_or_leader: has consultant_profile={user.consultant_profile is not None}")
+        if user.consultant_profile:
+            print(f"DEBUG is_admin_or_leader: is_leader={user.consultant_profile.is_leader}")
+    
+    return is_admin or is_consultant_leader
+
 def check_leader_permission(current_user: entities.Users = Depends(get_current_user)):
-    """Check if user has Admin or ConsultantLeader permission"""
-    user_perms_list = [p.permission_name.lower() for p in current_user.permissions]
-    if "admin" not in user_perms_list and "consultantleader" not in user_perms_list:
+    """Check if user is Admin or Consultant Leader"""
+    if not is_admin_or_leader(current_user):
         raise HTTPException(status_code=403, detail="Only Admin or Consultant Leader can review content")
     return current_user
 
@@ -578,8 +599,8 @@ def submit_document_for_review(
     """
     document = get_document_or_404(document_id, db)
     
-    # Check if user owns this document
-    if document.created_by != current_user.user_id and current_user.role not in ['Admin', 'ConsultantLeader']:
+    # Check if user owns this document or is admin/leader
+    if document.created_by != current_user.user_id and not is_admin_or_leader(current_user):
         raise HTTPException(status_code=403, detail="You can only submit your own documents for review")
     
     document.status = 'draft'
@@ -615,12 +636,12 @@ def approve_document(
 @router.post("/documents/{document_id}/reject")
 def reject_document(
     document_id: int,
-    reason: str = Form(None, description="Reason for rejection"),
+    reason: str = Form(..., description="Reason for rejection"),
     db: Session = Depends(get_db),
     current_user: entities.Users = Depends(check_leader_permission)
 ):
     """
-    Reject a document with an optional reason.
+    Reject a document with a reason.
     Only Admin or ConsultantLeader can reject documents.
     """
     document = get_document_or_404(document_id, db)
@@ -700,8 +721,8 @@ def submit_training_qa_for_review(
     """
     qa = get_training_qa_or_404(question_id, db)
     
-    # Check if user owns this Q&A
-    if qa.created_by != current_user.user_id and current_user.role not in ['Admin', 'ConsultantLeader']:
+    # Check if user owns this Q&A or is admin/leader
+    if qa.created_by != current_user.user_id and not is_admin_or_leader(current_user):
         raise HTTPException(status_code=403, detail="You can only submit your own Q&A for review")
     
     qa.status = 'draft'
@@ -737,12 +758,12 @@ def approve_training_qa(
 @router.post("/training_questions/{question_id}/reject")
 def reject_training_qa(
     question_id: int,
-    reason: str = Form(None, description="Reason for rejection"),
+    reason: str = Form(..., description="Reason for rejection"),
     db: Session = Depends(get_db),
     current_user: entities.Users = Depends(check_leader_permission)
 ):
     """
-    Reject a training Q&A with an optional reason.
+    Reject a training Q&A with a reason.
     Only Admin or ConsultantLeader can reject Q&A.
     """
     qa = get_training_qa_or_404(question_id, db)

@@ -53,7 +53,7 @@ def read_templates(db: Session = Depends(get_db), current_user: entities.Users =
     Read templates. Admin or Consultant permission required.
     """
     if has_permission(current_user, "Admin"):
-        templates = db.query(entities.Template).all()
+        templates = db.query(entities.Template).filter(entities.Template.is_active == True).all()
     elif has_permission(current_user, "Consultant"):
         templates = db.query(entities.Template).filter(entities.Template.is_active == True).all()
     else:
