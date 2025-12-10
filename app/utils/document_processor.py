@@ -1,3 +1,4 @@
+import io
 import PyPDF2
 import pdfplumber
 from docx import Document as DocxDocument
