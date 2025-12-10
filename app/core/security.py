@@ -208,10 +208,12 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)) -> O
             
         print(f"DEBUG: Token verified for email: {token_data.email}")
             
-        # Load user with permissions relationship eagerly loaded
+        # Load user with permissions, role, and consultant_profile relationships eagerly loaded
         from sqlalchemy.orm import selectinload
         user = db.query(Users).options(
-            selectinload(Users.permissions)
+            selectinload(Users.permissions),
+            selectinload(Users.role),
+            selectinload(Users.consultant_profile)
         ).filter(Users.email == token_data.email).first()
         
         print(f"DEBUG: Found user: {user.email if user else 'None'}")
