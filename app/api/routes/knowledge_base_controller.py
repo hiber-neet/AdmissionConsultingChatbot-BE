@@ -359,23 +359,28 @@ def get_document_by_id(
 
 def is_admin_or_leader(user: entities.Users) -> bool:
     """Helper function to check if user is Admin or Consultant Leader"""
-    # Get role name from the role relationship
-    role_name = user.role.role_name if user.role else None
+    if not user:
+        return False
     
-    print(f"DEBUG is_admin_or_leader: user_id={user.user_id}, role_name={role_name}")
+    # Check if user is Admin (using permissions, not role)
+    try:
+        user_perms = [p.permission_name.lower() for p in user.permissions] 
+    except AttributeError:
+        user_perms = [p.lower() for p in user.permissions]
     
-    is_admin = role_name == 'Admin'
+    is_admin = "admin" in user_perms
+    
+    # Check if user has Consultant permission AND is_leader flag
+    has_consultant_perm = "consultant" in user_perms
     is_consultant_leader = (
-        role_name == 'Consultant' and 
+        has_consultant_perm and
         user.consultant_profile is not None and 
         user.consultant_profile.is_leader
     )
     
-    print(f"DEBUG is_admin_or_leader: is_admin={is_admin}, is_consultant_leader={is_consultant_leader}")
-    if role_name == 'Consultant':
-        print(f"DEBUG is_admin_or_leader: has consultant_profile={user.consultant_profile is not None}")
-        if user.consultant_profile:
-            print(f"DEBUG is_admin_or_leader: is_leader={user.consultant_profile.is_leader}")
+    print(f"DEBUG is_admin_or_leader: user_id={user.user_id}, is_admin={is_admin}, is_consultant_leader={is_consultant_leader}")
+    if has_consultant_perm and user.consultant_profile:
+        print(f"DEBUG is_admin_or_leader: consultant_profile.is_leader={user.consultant_profile.is_leader}")
     
     return is_admin or is_consultant_leader
 
@@ -430,20 +435,30 @@ def api_approve_document(
     db: Session = Depends(get_db),
     current_user: entities.Users = Depends(check_leader_permission)
 ):
-    service = TrainingService()
+    try:
+        # Get document to retrieve its intent_id
+        document = get_document_or_404(document_id, db)
+        
+        service = TrainingService()
+        print(f"Approving document ID: {document_id}, Intent ID: {document.intend_id}")
 
-    result = service.approve_document(
-        db=db,
-        document_id=document_id,
-        reviewer_id=current_user.user_id,
-        intent_id=1
-    )
+        result = service.approve_document(
+            db=db,
+            document_id=document_id,
+            reviewer_id=current_user.user_id,
+            intent_id=document.intend_id  # Use actual intent_id from document
+        )
 
-    return {
-        "message": "Document approved and indexed",
-        "document_id": result.get("document_id"),
-        "status": result.get("status")
-    }
+        return {
+            "message": "Document approved and indexed",
+            "document_id": result.get("document_id"),
+            "status": result.get("status")
+        }
+    except Exception as e:
+        import traceback
+        print(f"Error approving document {document_id}:")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 
@@ -552,18 +567,24 @@ def api_approve_training_qa(
     db: Session = Depends(get_db),
     current_user: entities.Users = Depends(check_leader_permission)
 ):
-    service = TrainingService()
-    print("helloboy HELLOBOY")
-    result = service.approve_training_qa(
-        db=db,
-        qa_id=question_id,
-        reviewer_id=current_user.user_id
-    )
+    try:
+        service = TrainingService()
+        print(f"Approving training question ID: {question_id}")
+        result = service.approve_training_qa(
+            db=db,
+            qa_id=question_id,
+            reviewer_id=current_user.user_id
+        )
 
-    return {
-        "message": "Training QA approved",
-        **result
-    }
+        return {
+            "message": "Training QA approved",
+            **result
+        }
+    except Exception as e:
+        import traceback
+        print(f"Error approving training question {question_id}:")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
 # @router.post("/training_questions/{question_id}/approve")
 # def approve_training_qa(

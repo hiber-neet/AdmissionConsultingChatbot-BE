@@ -745,7 +745,7 @@ class TrainingService:
         # update DB
         qa.status = "approved"
         qa.approved_by = reviewer_id
-        qa.approved_at = datetime.now()
+        qa.approved_at = datetime.now().date()  # Convert datetime to date
         db.commit()
 
         return {
@@ -875,7 +875,7 @@ class TrainingService:
         # update document status
         doc.status = "approved"
         doc.reviewed_by = reviewer_id
-        doc.reviewed_at = datetime.now()
+        doc.reviewed_at = datetime.now().date()  # Convert datetime to date
         db.commit()
 
         return {
