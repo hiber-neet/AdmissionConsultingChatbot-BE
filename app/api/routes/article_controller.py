@@ -13,18 +13,27 @@ from app.core.security import (
 )
 from datetime import datetime
 from sqlalchemy import or_
+from fastapi import Form, File, UploadFile
+from app.core.cloudinary import upload_image_file
 
 router = APIRouter()
 
+# --- CREATE ARTICLE ---
 @router.post("", response_model=ArticleResponse)
 async def create_article(
-    article: ArticleCreate,
+    # Thay vì article: ArticleCreate, ta dùng Form và File
+    title: str = Form(...),
+    description: str = Form(...),
+    url: Optional[str] = Form(None),
+    note: Optional[str] = Form(None),
+    major_id: Optional[int] = Form(None),
+    specialization_id: Optional[int] = Form(None),
+    image: UploadFile = File(...), # Bắt buộc phải có ảnh khi tạo mới
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user)
 ):
     """
-    Create a new article (Content Manager only).
-    Article will be created with 'draft' status.
+    Create a new article with Image Upload to Cloudinary.
     """
     if not current_user or not verify_content_manager(current_user):
         raise HTTPException(
@@ -32,37 +41,36 @@ async def create_article(
             detail="Only content managers can create articles"
         )
 
-    # Validate major and specialization if provided
-    if article.major_id:
-        major = db.query(Major).filter(Major.major_id == article.major_id).first()
+    # 1. Validate Major/Specialization (Giữ nguyên logic cũ)
+    if major_id:
+        major = db.query(Major).filter(Major.major_id == major_id).first()
         if not major:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Major with id {article.major_id} not found"
-            )
+            raise HTTPException(status_code=404, detail=f"Major {major_id} not found")
 
-    if article.specialization_id:
-        spec = db.query(Specialization).filter(
-            Specialization.specialization_id == article.specialization_id
-        ).first()
+    if specialization_id:
+        spec = db.query(Specialization).filter(Specialization.specialization_id == specialization_id).first()
         if not spec:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Specialization with id {article.specialization_id} not found"
-            )
+            raise HTTPException(status_code=404, detail=f"Specialization {specialization_id} not found")
 
-    # Create new article with draft status
+    # 2. Upload ảnh lên Cloudinary
+    # Validate đuôi file nếu cần
+    if not image.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="File must be an image")
+    
+    image_url = upload_image_file(image)
+
+    # 3. Lưu vào DB
     new_article = Article(
-        title=article.title,
-        description=article.description,
-        url=article.url,
-        link_image=article.link_image,
-        note=article.note,
+        title=title,
+        description=description,
+        url=url,
+        link_image=image_url, # Lưu URL trả về từ Cloudinary
+        note=note,
         status="draft",
         create_at=datetime.now(),
         created_by=current_user.user_id,
-        major_id=article.major_id,
-        specialization_id=article.specialization_id
+        major_id=major_id,
+        specialization_id=specialization_id
     )
 
     db.add(new_article)
@@ -71,80 +79,67 @@ async def create_article(
 
     return new_article
 
+# --- UPDATE ARTICLE ---
 @router.put("/{article_id}", response_model=ArticleResponse)
 async def update_article(
     article_id: int,
-    article_update: ArticleUpdate,
+    # Các trường update đều là Optional
+    title: Optional[str] = Form(None),
+    description: Optional[str] = Form(None),
+    url: Optional[str] = Form(None),
+    note: Optional[str] = Form(None),
+    major_id: Optional[int] = Form(None),
+    specialization_id: Optional[int] = Form(None),
+    image: UploadFile | None = File(default=None), # Ảnh là tùy chọn khi update
     db: Session = Depends(get_db),
     current_user: Users = Depends(get_current_user)
 ):
     """
-    Update article content.
-    - Admin/Content Manager Leader: can edit any article
-    - Content Manager: can only edit their own articles
+    Update article. If 'image' is provided, upload new image. If not, keep old image.
     """
     if not current_user or not verify_content_manager(current_user):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only content managers can update articles"
-        )
+        raise HTTPException(status_code=403, detail="Only content managers can update articles")
 
-    # Get the article
     article = db.query(Article).filter(Article.article_id == article_id).first()
     if not article:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Article with id {article_id} not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Article {article_id} not found")
 
-    # Check permissions: Admin/Leader can edit any, regular CM can only edit their own
+    # Check permissions logic (Giữ nguyên)
     is_admin_user = is_admin(current_user)
     is_leader = verify_content_manager_leader(current_user)
-    
     if not (is_admin_user or is_leader) and article.created_by != current_user.user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only edit your own articles"
-        )
+        raise HTTPException(status_code=403, detail="You can only edit your own articles")
 
-    # Validate major and specialization if provided
-    if article_update.major_id is not None:
-        major = db.query(Major).filter(Major.major_id == article_update.major_id).first()
-        if not major:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Major with id {article_update.major_id} not found"
-            )
+    # Validate Major/Spec (Giữ nguyên)
+    if major_id is not None:
+        if not db.query(Major).filter(Major.major_id == major_id).first():
+             raise HTTPException(status_code=404, detail=f"Major {major_id} not found")
+        article.major_id = major_id
 
-    if article_update.specialization_id is not None:
-        spec = db.query(Specialization).filter(
-            Specialization.specialization_id == article_update.specialization_id
-        ).first()
-        if not spec:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Specialization with id {article_update.specialization_id} not found"
-            )
+    if specialization_id is not None:
+        if not db.query(Specialization).filter(Specialization.specialization_id == specialization_id).first():
+            raise HTTPException(status_code=404, detail=f"Specialization {specialization_id} not found")
+        article.specialization_id = specialization_id
 
-    # Update fields if provided
-    if article_update.title is not None:
-        article.title = article_update.title
-    if article_update.description is not None:
-        article.description = article_update.description
-    if article_update.url is not None:
-        article.url = article_update.url
-    if article_update.link_image is not None:
-        article.link_image = article_update.link_image
-    if article_update.note is not None:
-        article.note = article_update.note
-    if article_update.major_id is not None:
-        article.major_id = article_update.major_id
-    if article_update.specialization_id is not None:
-        article.specialization_id = article_update.specialization_id
+    # Update Text Fields
+    if title is not None: article.title = title
+    if description is not None: article.description = description
+    if url is not None: article.url = url
+    if note is not None: article.note = note
+
+    # --- XỬ LÝ UPDATE ẢNH ---
+    if image is not None:
+        # Nếu user gửi file mới lên -> Upload và thay thế link cũ
+        if not image.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="File must be an image")
+        
+        new_image_url = upload_image_file(image)
+        article.link_image = new_image_url
+    
+    # Nếu image là None, giữ nguyên article.link_image cũ
 
     db.commit()
     db.refresh(article)
-
     return article
 
 @router.put("/{article_id}/status", response_model=ArticleResponse)
@@ -233,6 +228,7 @@ async def get_articles(
             title=article.title,
             description=article.description,
             url=article.url,
+            link_image=article.link_image,
             status=article.status,
             create_at=article.create_at,
             created_by=article.created_by,
@@ -290,6 +286,7 @@ async def get_draft_articles_for_review(
             title=article.title,
             description=article.description,
             url=article.url,
+            link_image=article.link_image,
             status=article.status,
             create_at=article.create_at,
             created_by=article.created_by,
@@ -370,6 +367,7 @@ async def get_article(
         title=article.title,
         description=article.description,
         url=article.url,
+        link_image=article.link_image,
         status=article.status,
         create_at=article.create_at,
         created_by=article.created_by,
@@ -490,6 +488,7 @@ async def get_articles_by_user(
             title=article.title,
             description=article.description,
             url=article.url,
+            link_image=article.link_image,
             status=article.status,
             create_at=article.create_at,
             created_by=article.created_by,
