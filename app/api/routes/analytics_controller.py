@@ -164,7 +164,7 @@ async def get_knowledge_gaps(
             
             if not is_covered:
                 # Use intent name from best matching training question, or "Unclassified" if no match
-                intent_name = best_match_intent_name if best_match_intent_name else "Unclassified"
+                intent_name = best_match_intent_name if best_match_intent_name else "N/A"
                 
                 # Enhanced suggested action
                 suggested_action = "Create comprehensive answer for this question"
@@ -748,10 +748,8 @@ async def get_trending_topics(
             historical_count = historical_topic_counts.get(topic_name, 0)
             # Calculate growth rate
             if historical_count > 0:
-                print("Vào đây rồi: ", recent_count, historical_count)
                 growth_rate = round(((recent_count - historical_count) / historical_count) * 100)
             else:
-                print("Vào else rồi: ", recent_count, historical_count)
                 # If no historical data, set growth rate to 100% if there are recent questions
                 growth_rate = 100 if recent_count > 0 else 0
             
