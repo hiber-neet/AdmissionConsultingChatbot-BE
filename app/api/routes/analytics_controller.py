@@ -446,106 +446,353 @@ async def get_low_satisfaction_answers(
 
 @router.get("/trending-topics")
 async def get_trending_topics(
-    days: int = Query(14, description="Number of days to analyze for trends"),
-    min_questions: int = Query(5, description="Minimum questions to be considered trending"),
+    days: int = Query(14, description="Số ngày để phân tích xu hướng"),
     db: Session = Depends(get_db),
     current_user: entities.Users = Depends(check_analytics_permission)
 ):
     """
-    Get trending topics based on recent question patterns
+    Lấy các chủ đề đang thịnh hành dựa trên câu hỏi thực tế của người dùng - trả về top 10 chủ đề được hỏi nhiều nhất
     """
     try:
-        # Calculate date thresholds (convert to date for comparison)
+        # Calculate date thresholds
+        today = datetime.now().date()
         recent_date = (datetime.now() - timedelta(days=days)).date()
         historical_date = (datetime.now() - timedelta(days=days*2)).date()
         
-        # Define topic keywords for categorization
+        # Debug: Check total records and date ranges
+        total_records = db.query(func.count(entities.ChatInteraction.interaction_id)).filter(
+            entities.ChatInteraction.is_from_bot == False
+        ).scalar()
+        
+        # Check date distribution
+        date_stats = db.query(
+            func.min(entities.ChatInteraction.timestamp).label('min_date'),
+            func.max(entities.ChatInteraction.timestamp).label('max_date'),
+            func.count(entities.ChatInteraction.interaction_id).label('total')
+        ).filter(
+            entities.ChatInteraction.is_from_bot == False
+        ).first()
+        # Get all user questions in the recent period
+        recent_questions = db.query(
+            entities.ChatInteraction.message_text,
+            func.count(entities.ChatInteraction.interaction_id).label('count')
+        ).filter(
+            and_(
+                entities.ChatInteraction.is_from_bot == False,
+                entities.ChatInteraction.timestamp >= recent_date,
+                entities.ChatInteraction.message_text.isnot(None),
+                entities.ChatInteraction.message_text != ''
+            )
+        ).group_by(
+            entities.ChatInteraction.message_text
+        ).order_by(
+            desc('count')
+        ).all()
+        
+        # Get all user questions in the historical period (for comparison)
+        # Use cast to ensure proper date comparison
+        historical_questions = db.query(
+            entities.ChatInteraction.message_text,
+            func.count(entities.ChatInteraction.interaction_id).label('count')
+        ).filter(
+            and_(
+                entities.ChatInteraction.is_from_bot == False,
+                entities.ChatInteraction.timestamp >= historical_date,
+                entities.ChatInteraction.timestamp < recent_date,
+                entities.ChatInteraction.message_text.isnot(None),
+                entities.ChatInteraction.message_text != ''
+            )
+        ).group_by(
+            entities.ChatInteraction.message_text
+        ).order_by(
+            desc('count')
+        ).all()
+        
+        # Debug: Check sample dates
+        sample_dates = db.query(
+            entities.ChatInteraction.timestamp,
+            func.count(entities.ChatInteraction.interaction_id).label('count')
+        ).filter(
+            entities.ChatInteraction.is_from_bot == False
+        ).group_by(
+            entities.ChatInteraction.timestamp
+        ).order_by(
+            desc(entities.ChatInteraction.timestamp)
+        ).limit(10).all()
+        
+        # Define topic keywords for categorization (fallback when intent not found)
         topics_keywords = {
-            "Study Abroad Programs": ["abroad", "exchange", "international", "overseas", "study abroad"],
-            "AI and Computer Science": ["ai", "artificial intelligence", "computer science", "programming", "software", "tech"],
-            "Admissions Process": ["admission", "apply", "application", "deadline", "requirement"],
-            "Financial Aid": ["scholarship", "financial aid", "tuition", "fee", "cost", "money"],
-            "Campus Life": ["campus", "dormitory", "housing", "student life", "facilities"],
-            "Online Learning": ["online", "remote", "virtual", "distance learning", "e-learning"],
-            "Career Services": ["career", "job", "internship", "employment", "placement"]
+            "Chương trình Du học": [
+                "abroad", "exchange", "international", "overseas", "study abroad",
+                "du học", "nước ngoài", "trao đổi", "quốc tế", "liên kết", "toàn cầu"
+            ],
+            "Trí tuệ Nhân tạo và Khoa học Máy tính": [
+                "ai", "artificial intelligence", "computer science", "programming", "software", "tech",
+                "trí tuệ nhân tạo", "công nghệ thông tin", "cntt", "lập trình", "phần mềm", 
+                "khoa học máy tính", "kỹ thuật phần mềm", "an toàn thông tin", "hệ thống", "iot"
+            ],
+            "Quy trình Tuyển sinh": [
+                "admission", "apply", "application", "deadline", "requirement",
+                "tuyển sinh", "xét tuyển", "đăng ký", "hồ sơ", "nộp đơn", 
+                "điều kiện", "hạn chót", "thủ tục", "nhập học", "điểm chuẩn", "học bạ", "thi tuyển"
+            ],
+            "Hỗ trợ Tài chính": [
+                "scholarship", "financial aid", "tuition", "fee", "cost", "money",
+                "học bổng", "tài chính", "học phí", "chi phí", "tiền học", 
+                "hỗ trợ", "miễn giảm", "vay vốn", "ưu đãi", "tín dụng"
+            ],
+            "Đời sống Sinh viên": [
+                "campus", "dormitory", "housing", "student life", "facilities",
+                "ký túc xá", "ktx", "đời sống", "sinh hoạt", "cơ sở vật chất", 
+                "khuôn viên", "câu lạc bộ", "clb", "sự kiện", "ngoại khóa", "ăn ở"
+            ],
+            "Học tập Trực tuyến": [
+                "online", "remote", "virtual", "distance learning", "e-learning",
+                "trực tuyến", "từ xa", "qua mạng", "online", "học ảo", "zoom", "meet"
+            ],
+            "Dịch vụ Nghề nghiệp": [
+                "career", "job", "internship", "employment", "placement",
+                "việc làm", "nghề nghiệp", "thực tập", "tuyển dụng", "cơ hội", 
+                "ra trường", "lương", "doanh nghiệp", "đầu ra", "ojt"
+            ]
         }
         
+        # Get all intents from database (these will be our dynamic topics)
+        all_intents = db.query(
+            entities.Intent.intent_id,
+            entities.Intent.intent_name,
+            entities.Intent.description
+        ).all()
+        
+        # Build intent map for quick lookup
+        intent_map = {intent.intent_id: {
+            "name": intent.intent_name,
+            "description": intent.description
+        } for intent in all_intents}
+        
+        # Get all training questions with their intents for mapping
+        training_qa_map = {}
+        training_questions = db.query(
+            entities.TrainingQuestionAnswer.question,
+            entities.Intent.intent_name
+        ).join(
+            entities.Intent,
+            entities.TrainingQuestionAnswer.intent_id == entities.Intent.intent_id
+        ).filter(
+            entities.TrainingQuestionAnswer.status == 'approved',
+            entities.TrainingQuestionAnswer.question.isnot(None)
+        ).all()
+        
+        # Build a map of training questions to intents (normalized)
+        for train_q, intent_name in training_questions:
+            if train_q:
+                train_q_lower = train_q.lower().strip()
+                training_qa_map[train_q_lower] = intent_name
+        
+        # Get all KnowledgeBase documents with their intents for mapping
+        knowledge_base_map = {}
+        knowledge_base_documents = db.query(
+            entities.KnowledgeBaseDocument.title,
+            entities.KnowledgeBaseDocument.category,
+            entities.Intent.intent_name
+        ).join(
+            entities.Intent,
+            entities.KnowledgeBaseDocument.intend_id == entities.Intent.intent_id
+        ).filter(
+            entities.KnowledgeBaseDocument.status == 'approved',
+            entities.KnowledgeBaseDocument.title.isnot(None)
+        ).all()
+        
+        # Build a map of document titles/categories to intents (normalized)
+        for doc_title, doc_category, intent_name in knowledge_base_documents:
+            if doc_title:
+                doc_title_lower = doc_title.lower().strip()
+                knowledge_base_map[doc_title_lower] = intent_name
+            if doc_category:
+                doc_category_lower = doc_category.lower().strip()
+                knowledge_base_map[doc_category_lower] = intent_name
+        
+        # Get document chunks for additional matching
+        document_chunks = db.query(
+            entities.DocumentChunk.chunk_text,
+            entities.Intent.intent_name
+        ).join(
+            entities.KnowledgeBaseDocument,
+            entities.DocumentChunk.document_id == entities.KnowledgeBaseDocument.document_id
+        ).join(
+            entities.Intent,
+            entities.KnowledgeBaseDocument.intend_id == entities.Intent.intent_id
+        ).filter(
+            entities.KnowledgeBaseDocument.status == 'approved',
+            entities.DocumentChunk.chunk_text.isnot(None)
+        ).all()
+        
+        # Build a map of key phrases from chunks to intents
+        chunk_keywords_map = {}
+        for chunk_text, intent_name in document_chunks:
+            if chunk_text:
+                # Extract key words/phrases from chunk (first 200 chars for performance)
+                chunk_preview = chunk_text[:200].lower()
+                # Split into words and keep meaningful ones (length > 3)
+                words = [w.strip() for w in chunk_preview.split() if len(w.strip()) > 3]
+                # Map each meaningful word to intent
+                for word in words[:10]:  # Limit to first 10 words for performance
+                    if word not in chunk_keywords_map:
+                        chunk_keywords_map[word] = intent_name
+        
+        # Topic counts dictionary
+        topic_counts = {}
+        
+        # Helper function to classify question into topic
+        def classify_question(question_text: str) -> Optional[str]:
+            if not question_text:
+                return None
+            
+            question_lower = question_text.lower().strip()
+            question_words = set(question_lower.split())
+            
+            # First, try to match with training questions (exact or similar)
+            for train_q_lower, intent_name in training_qa_map.items():
+                # Exact match
+                if question_lower == train_q_lower:
+                    return intent_name
+                # Substring match
+                if train_q_lower in question_lower or question_lower in train_q_lower:
+                    return intent_name
+                # Word overlap check
+                train_words = set(train_q_lower.split())
+                common_words = question_words & train_words
+                if len(common_words) >= 2:
+                    overlap_ratio = len(common_words) / max(len(question_words), len(train_words), 1)
+                    if overlap_ratio > 0.5:
+                        return intent_name
+            
+            # Second, try to match with KnowledgeBase document titles/categories
+            for doc_key, intent_name in knowledge_base_map.items():
+                # Exact match
+                if question_lower == doc_key:
+                    return intent_name
+                # Substring match
+                if doc_key in question_lower or question_lower in doc_key:
+                    return intent_name
+                # Word overlap check
+                doc_words = set(doc_key.split())
+                common_words = question_words & doc_words
+                if len(common_words) >= 2:
+                    overlap_ratio = len(common_words) / max(len(question_words), len(doc_words), 1)
+                    if overlap_ratio > 0.5:
+                        return intent_name
+            
+            # Third, try to match with keywords from document chunks
+            for word in question_words:
+                if len(word) > 3 and word in chunk_keywords_map:
+                    return chunk_keywords_map[word]
+            
+            # Fallback: keyword-based classification
+            for topic_name, keywords in topics_keywords.items():
+                for keyword in keywords:
+                    if keyword.lower() in question_lower:
+                        return topic_name
+            
+            return "Khác"
+        
+        # Topic counts dictionary for recent and historical periods
+        recent_topic_counts = {}
+        historical_topic_counts = {}
+        
+        # Classify recent questions and count by topic
+        for question_text, count in recent_questions:
+            topic = classify_question(question_text)
+            if topic:
+                if topic not in recent_topic_counts:
+                    recent_topic_counts[topic] = 0
+                recent_topic_counts[topic] += count
+        
+        # Classify historical questions and count by topic
+        classified_historical = 0
+        for question_text, count in historical_questions:
+            topic = classify_question(question_text)
+            if topic:
+                classified_historical += count
+                if topic not in historical_topic_counts:
+                    historical_topic_counts[topic] = 0
+                historical_topic_counts[topic] += count
+        
+        # Build trending topics list
         trending_topics = []
         
-        for topic_name, keywords in topics_keywords.items():
-            # Build keyword search condition
-            keyword_conditions = []
-            for keyword in keywords:
-                keyword_conditions.append(
-                    entities.ChatInteraction.message_text.ilike(f'%{keyword}%')
-                )
-            
-            # Count recent questions
-            recent_count = db.query(func.count(entities.ChatInteraction.interaction_id)).filter(
-                and_(
-                    entities.ChatInteraction.is_from_bot == False,
-                    entities.ChatInteraction.timestamp >= recent_date,
-                    or_(*keyword_conditions)
-                )
-            ).scalar() or 0
-            
-            # Count historical questions for comparison
-            historical_count = db.query(func.count(entities.ChatInteraction.interaction_id)).filter(
-                and_(
-                    entities.ChatInteraction.is_from_bot == False,
-                    entities.ChatInteraction.timestamp >= historical_date,
-                    entities.ChatInteraction.timestamp < recent_date,
-                    or_(*keyword_conditions)
-                )
-            ).scalar() or 0
-            
-            if recent_count >= min_questions:
-                # Calculate growth rate
-                if historical_count > 0:
-                    growth_rate = round(((recent_count - historical_count) / historical_count) * 100)
-                else:
-                    growth_rate = 100 if recent_count > 0 else 0
-                
-                # Only include if showing growth or significant volume
-                if growth_rate > 20 or recent_count >= min_questions * 2:
-                    # Generate description and action based on topic
-                    descriptions = {
-                        "Study Abroad Programs": "Growing interest in international exchange opportunities and semester abroad programs",
-                        "AI and Computer Science": "Increased inquiries about AI curriculum, computer science programs and tech career paths",
-                        "Admissions Process": "Rising questions about application procedures, requirements and deadlines",
-                        "Financial Aid": "More students seeking information about scholarships and financial support options",
-                        "Campus Life": "Increased interest in campus facilities, housing options and student activities",
-                        "Online Learning": "Growing demand for information about remote and hybrid learning options",
-                        "Career Services": "Rising questions about career support, internships and job placement services"
-                    }
-                    
-                    actions = {
-                        "Study Abroad Programs": "Create dedicated section for international programs and partnerships",
-                        "AI and Computer Science": "Highlight AI specializations and computer science curriculum details",
-                        "Admissions Process": "Expand admission requirements and application process documentation", 
-                        "Financial Aid": "Create comprehensive financial aid and scholarship information guide",
-                        "Campus Life": "Document campus facilities, housing options and student life activities",
-                        "Online Learning": "Add information about online and hybrid program offerings",
-                        "Career Services": "Expand career services and internship opportunity information"
-                    }
-                    
-                    trending_topics.append({
-                        "id": len(trending_topics) + 1,
-                        "topic": topic_name,
-                        "growthRate": max(growth_rate, 0),  # Ensure non-negative
-                        "questionsCount": recent_count,
-                        "description": descriptions.get(topic_name, f"Increased activity in {topic_name.lower()} related questions"),
-                        "action": actions.get(topic_name, f"Create more content about {topic_name.lower()}"),
-                        "timeframe": f"last {days} days"
-                    })
+        # Default descriptions and actions for keyword-based topics (fallback)
+        default_descriptions = {
+            "Chương trình Du học": "Sự quan tâm ngày càng tăng về các cơ hội trao đổi quốc tế và chương trình học kỳ ở nước ngoài",
+            "Trí tuệ Nhân tạo và Khoa học Máy tính": "Tăng cường các câu hỏi về chương trình AI, khoa học máy tính và con đường sự nghiệp công nghệ",
+            "Quy trình Tuyển sinh": "Nhiều câu hỏi về quy trình nộp đơn, yêu cầu và thời hạn tuyển sinh",
+            "Hỗ trợ Tài chính": "Nhiều sinh viên tìm kiếm thông tin về học bổng và các lựa chọn hỗ trợ tài chính",
+            "Đời sống Sinh viên": "Tăng sự quan tâm về cơ sở vật chất khuôn viên, lựa chọn nhà ở và hoạt động sinh viên",
+            "Học tập Trực tuyến": "Nhu cầu ngày càng tăng về thông tin các lựa chọn học tập từ xa và kết hợp",
+            "Dịch vụ Nghề nghiệp": "Nhiều câu hỏi về hỗ trợ nghề nghiệp, thực tập và dịch vụ việc làm"
+        }
         
-        # Sort by growth rate and question count
-        trending_topics.sort(key=lambda x: (x["growthRate"], x["questionsCount"]), reverse=True)
+        default_actions = {
+            "Chương trình Du học": "Tạo phần chuyên biệt cho các chương trình quốc tế và đối tác",
+            "Trí tuệ Nhân tạo và Khoa học Máy tính": "Làm nổi bật các chuyên ngành AI và chi tiết chương trình khoa học máy tính",
+            "Quy trình Tuyển sinh": "Mở rộng tài liệu về yêu cầu tuyển sinh và quy trình nộp đơn", 
+            "Hỗ trợ Tài chính": "Tạo hướng dẫn toàn diện về hỗ trợ tài chính và học bổng",
+            "Đời sống Sinh viên": "Tài liệu hóa cơ sở vật chất khuôn viên, lựa chọn nhà ở và hoạt động đời sống sinh viên",
+            "Học tập Trực tuyến": "Thêm thông tin về các chương trình học trực tuyến và kết hợp",
+            "Dịch vụ Nghề nghiệp": "Mở rộng thông tin về dịch vụ nghề nghiệp và cơ hội thực tập"
+        }
         
-        return trending_topics[:10]  # Return top 10
+        # Calculate growth rate for each topic
+        for topic_name, recent_count in sorted(recent_topic_counts.items(), key=lambda x: x[1], reverse=True):
+            # Get historical count (default to 0 if not found)
+            historical_count = historical_topic_counts.get(topic_name, 0)
+            # Calculate growth rate
+            if historical_count > 0:
+                print("Vào đây rồi: ", recent_count, historical_count)
+                growth_rate = round(((recent_count - historical_count) / historical_count) * 100)
+            else:
+                print("Vào else rồi: ", recent_count, historical_count)
+                # If no historical data, set growth rate to 100% if there are recent questions
+                growth_rate = 100 if recent_count > 0 else 0
+            
+            # Check if topic is an Intent (from database) or keyword-based topic
+            # Find matching intent by name
+            matching_intent = None
+            for intent_id, intent_data in intent_map.items():
+                if intent_data["name"] == topic_name:
+                    matching_intent = intent_data
+                    break
+            
+            # Use intent description if available, otherwise use default or generate
+            if matching_intent and matching_intent["description"]:
+                description = matching_intent["description"]
+            else:
+                description = default_descriptions.get(
+                    topic_name, 
+                    f"Hoạt động cao trong các câu hỏi liên quan đến {topic_name.lower()}"
+                )
+            
+            # Use default action or generate generic one
+            action = default_actions.get(
+                topic_name,
+                f"Tạo thêm nội dung về {topic_name.lower()}"
+            )
+            
+            trending_topics.append({
+                "id": len(trending_topics) + 1,
+                "topic": topic_name,
+                "questionsCount": recent_count,
+                "growthRate": max(growth_rate, 0),  # Ensure non-negative
+                "description": description,
+                "action": action,
+                "timeframe": f"{days} ngày qua"
+            })
+        
+        # Return top 10 most asked topics
+        return trending_topics[:10]
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error analyzing trending topics: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Lỗi khi phân tích các chủ đề thịnh hành: {str(e)}")
 
 @router.get("/content-statistics")
 async def get_content_statistics(
@@ -1067,11 +1314,11 @@ async def get_category_statistics(
         
         # Define category keywords
         category_keywords = {
-            'Admission Requirements': ['admission', 'application', 'requirement', 'deadline', 'gpa', 'grade', 'apply', 'entrance', 'tuyển sinh', 'hồ sơ', 'điểm', 'yêu cầu', 'thời hạn', 'nộp', 'hạn chót', 'thủ tục', 'tuyển', 'điều kiện', 'học bạ', 'thi', 'hồ sơ', 'tài liệu'],
-            'Financial Aid': ['financial aid', 'scholarship', 'tuition', 'fee', 'cost', 'funding', 'loan', 'grant', 'học phí', 'tiền', 'bao nhiêu', 'học bổng', 'tài chính', 'vay', 'trợ cấp'],
-            'Academic Programs': ['program', 'major', 'course', 'curriculum', 'degree', 'bachelor', 'master', 'subject', 'ngành', 'chuyên ngành', 'khóa học', 'chương trình', 'học phần', 'bằng cấp', 'cử nhân', 'thạc sĩ', 'tiến sĩ', 'môn học', 'khoa', 'đào tạo'],
-            'Campus Life': ['campus', 'dormitory', 'housing', 'student life', 'activities', 'club', 'facility', 'tour', 'cơ sở', 'hoạt động', 'ký túc xá', 'câu lạc bộ', 'clb', 'khuôn viên', 'cơ sở vật chất', 'thư viện', 'nhà xe', 'canteen', 'nhà ăn', 'chỗ ở', 'ngoại khóa'],
-            'Career Services': ['career', 'internship', 'job placement', 'employment', 'graduation rate', 'alumni', 'nghề nghiệp', 'việc làm', 'thực tập', 'tốt nghiệp', 'cựu sinh viên', 'hỗ trợ việc làm', 'tư vấn nghề nghiệp', 'đầu ra', 'công ty', 'doanh nghiệp', 'lương', 'tuyển dụng', 'ra trường'],
+            'Yêu cầu tuyển sinh': ['admission', 'application', 'requirement', 'deadline', 'gpa', 'grade', 'apply', 'entrance', 'tuyển sinh', 'hồ sơ', 'điểm', 'yêu cầu', 'thời hạn', 'nộp', 'hạn chót', 'thủ tục', 'tuyển', 'điều kiện', 'học bạ', 'thi', 'hồ sơ', 'tài liệu'],
+            'Tài chính': ['financial aid', 'scholarship', 'tuition', 'fee', 'cost', 'funding', 'loan', 'grant', 'học phí', 'tiền', 'bao nhiêu', 'học bổng', 'tài chính', 'vay', 'trợ cấp'],
+            'Chương trình học': ['program', 'major', 'course', 'curriculum', 'degree', 'bachelor', 'master', 'subject', 'ngành', 'chuyên ngành', 'khóa học', 'chương trình', 'học phần', 'bằng cấp', 'cử nhân', 'thạc sĩ', 'tiến sĩ', 'môn học', 'khoa', 'đào tạo'],
+            'Đời sống sinh viên': ['campus', 'dormitory', 'housing', 'student life', 'activities', 'club', 'facility', 'tour', 'cơ sở', 'hoạt động', 'ký túc xá', 'câu lạc bộ', 'clb', 'khuôn viên', 'cơ sở vật chất', 'thư viện', 'nhà xe', 'canteen', 'nhà ăn', 'chỗ ở', 'ngoại khóa'],
+            'Dịch vụ nghề nghiệp': ['career', 'internship', 'job placement', 'employment', 'graduation rate', 'alumni', 'nghề nghiệp', 'việc làm', 'thực tập', 'tốt nghiệp', 'cựu sinh viên', 'hỗ trợ việc làm', 'tư vấn nghề nghiệp', 'đầu ra', 'công ty', 'doanh nghiệp', 'lương', 'tuyển dụng', 'ra trường'],
         }
         
         # Initialize category stats
