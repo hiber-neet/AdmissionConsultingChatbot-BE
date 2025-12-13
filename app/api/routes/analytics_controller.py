@@ -745,7 +745,7 @@ async def get_consultant_statistics(
         # Most active day (since we only have date, not time) - chatbot sessions only
         # Get the day of week with most questions in the last 30 days
         day_counts = {}
-        day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        day_names = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']
         recent_interactions = db.query(entities.ChatInteraction.timestamp).join(
             entities.ChatSession, entities.ChatInteraction.session_id == entities.ChatSession.chat_session_id
         ).filter(
@@ -829,14 +829,187 @@ async def get_consultant_statistics(
                 "queries": day_queries
             })
         
-        # Question categories (based on message content analysis)
-        question_categories = [
-            {"name": "Admissions", "value": 35, "color": "#3B82F6"},
-            {"name": "Academic", "value": 25, "color": "#10B981"},
-            {"name": "Financial", "value": 20, "color": "#F59E0B"},
-            {"name": "Campus Life", "value": 15, "color": "#8B5CF6"},
-            {"name": "Other", "value": 5, "color": "#6B7280"}
-        ]
+        # Question categories - using actual data from database
+        # Strategy: Use FaqStatistics which tracks question-answer pairs with intent_id and usage_count
+        # This provides real data from actual chatbot interactions
+        
+        # Get question categories from FaqStatistics (real usage data from chatbot)
+        # FaqStatistics.usage_count represents how many times each Q&A pair was used
+        faq_stats_by_intent = (
+            db.query(
+                entities.Intent.intent_name,
+                func.sum(entities.FaqStatistics.usage_count).label('total_count')
+            )
+            .join(entities.FaqStatistics, entities.Intent.intent_id == entities.FaqStatistics.intent_id)
+            .filter(entities.FaqStatistics.usage_count > 0)
+            .group_by(entities.Intent.intent_name)
+            .all()
+        )
+        
+        # Category colors mapping
+        category_colors = {
+            "Admissions": "#3B82F6",
+            "Academic Programs": "#10B981",
+            "Financial Aid": "#F59E0B",
+            "Campus Life": "#8B5CF6",
+            "Career Services": "#EF4444",
+            "Other": "#6B7280"
+        }
+        
+        # Map intent names to categories
+        def map_intent_to_category(intent_name: str) -> str:
+            """Map intent name to category based on keywords"""
+            if not intent_name:
+                return "Other"
+            
+            intent_lower = intent_name.lower()
+            
+            # Check for admission-related keywords
+            if any(kw in intent_lower for kw in ['admission', 'tuyển sinh', 'hồ sơ', 'nộp đơn', 'application', 'apply', 'tuyển', 'điều kiện']):
+                return "Admissions"
+            # Check for academic/program-related keywords
+            elif any(kw in intent_lower for kw in ['academic', 'program', 'major', 'ngành', 'chương trình', 'học', 'course', 'curriculum', 'degree', 'chuyên ngành']):
+                return "Academic Programs"
+            # Check for financial aid-related keywords
+            elif any(kw in intent_lower for kw in ['financial', 'scholarship', 'tuition', 'học phí', 'học bổng', 'fee', 'cost', 'tài chính']):
+                return "Financial Aid"
+            # Check for campus life-related keywords
+            elif any(kw in intent_lower for kw in ['campus', 'life', 'housing', 'dormitory', 'ký túc', 'cơ sở', 'facility', 'student life']):
+                return "Campus Life"
+            # Check for career-related keywords
+            elif any(kw in intent_lower for kw in ['career', 'job', 'internship', 'nghề nghiệp', 'việc làm', 'employment', 'tốt nghiệp']):
+                return "Career Services"
+            else:
+                return "Other"
+        
+        # Initialize category counts
+        category_counts = {
+            "Admissions": 0,
+            "Academic Programs": 0,
+            "Financial Aid": 0,
+            "Campus Life": 0,
+            "Career Services": 0,
+            "Other": 0
+        }
+        
+        # Count questions by category from FaqStatistics (real usage data)
+        # usage_count represents how many times each Q&A pair was actually used
+        for intent_name, count in faq_stats_by_intent:
+            category = map_intent_to_category(intent_name)
+            category_counts[category] += int(count) if count else 0
+        
+        # If FaqStatistics is empty or has very little data, fallback to direct user questions analysis
+        total_from_faq = sum(count for _, count in faq_stats_by_intent)
+        if total_from_faq == 0:
+            # Fallback: Get user questions directly and match with training questions
+            user_questions = (
+                db.query(
+                    entities.ChatInteraction.message_text,
+                    func.count(entities.ChatInteraction.interaction_id).label('frequency')
+                )
+                .join(entities.ChatSession, entities.ChatInteraction.session_id == entities.ChatSession.chat_session_id)
+                .filter(
+                    and_(
+                        entities.ChatSession.session_type == 'chatbot',
+                        entities.ChatInteraction.is_from_bot == False,
+                        entities.ChatInteraction.timestamp >= thirty_days_ago.date(),
+                        entities.ChatInteraction.message_text.isnot(None),
+                        func.length(entities.ChatInteraction.message_text) > 10
+                    )
+                )
+                .group_by(entities.ChatInteraction.message_text)
+                .limit(200)  # Limit to avoid performance issues
+                .all()
+            )
+            
+            # Get training questions with intents for matching
+            training_with_intents = (
+                db.query(
+                    entities.TrainingQuestionAnswer.question,
+                    entities.Intent.intent_name
+                )
+                .join(entities.Intent, entities.TrainingQuestionAnswer.intent_id == entities.Intent.intent_id)
+                .filter(entities.TrainingQuestionAnswer.status == 'approved')
+                .all()
+            )
+            
+            # Create a dictionary of training questions for faster lookup
+            training_questions_dict = {}
+            for train_q, intent_name in training_with_intents:
+                if train_q:
+                    train_q_lower = train_q.lower().strip()
+                    training_questions_dict[train_q_lower] = intent_name
+            
+            # Match user questions with training questions and categorize
+            for user_q, frequency in user_questions:
+                if not user_q:
+                    continue
+                
+                user_q_lower = user_q.lower().strip()
+                matched = False
+                
+                # Try exact match first
+                if user_q_lower in training_questions_dict:
+                    intent_name = training_questions_dict[user_q_lower]
+                    category = map_intent_to_category(intent_name)
+                    category_counts[category] += frequency
+                    matched = True
+                else:
+                    # Try partial/substring match
+                    for train_q_lower, intent_name in training_questions_dict.items():
+                        if train_q_lower in user_q_lower or user_q_lower in train_q_lower:
+                            category = map_intent_to_category(intent_name)
+                            category_counts[category] += frequency
+                            matched = True
+                            break
+                        
+                        # Check word overlap for similarity
+                        user_words = set(user_q_lower.split())
+                        train_words = set(train_q_lower.split())
+                        common_words = user_words & train_words
+                        if len(common_words) >= 2:
+                            overlap_ratio = len(common_words) / max(len(user_words), len(train_words), 1)
+                            if overlap_ratio > 0.5:
+                                category = map_intent_to_category(intent_name)
+                                category_counts[category] += frequency
+                                matched = True
+                                break
+                
+                # If not matched, try keyword-based classification
+                if not matched:
+                    user_q_lower = user_q.lower()
+                    keyword_matched = False
+                    
+                    # Define category keywords for fallback
+                    category_keywords = {
+                        'Admissions': ['admission', 'application', 'requirement', 'deadline', 'gpa', 'apply', 'tuyển sinh', 'hồ sơ', 'điểm', 'yêu cầu', 'nộp', 'hạn chót'],
+                        'Academic Programs': ['program', 'major', 'course', 'curriculum', 'degree', 'ngành', 'chuyên ngành', 'khóa học', 'chương trình', 'học phần'],
+                        'Financial Aid': ['scholarship', 'tuition', 'fee', 'cost', 'học phí', 'học bổng', 'tài chính'],
+                        'Campus Life': ['campus', 'dormitory', 'housing', 'facility', 'cơ sở', 'ký túc xá', 'câu lạc bộ'],
+                        'Career Services': ['career', 'internship', 'job', 'employment', 'nghề nghiệp', 'việc làm', 'tốt nghiệp']
+                    }
+                    
+                    for category, keywords in category_keywords.items():
+                        if any(keyword in user_q_lower for keyword in keywords):
+                            category_counts[category] += frequency
+                            keyword_matched = True
+                            break
+                    
+                    if not keyword_matched:
+                        category_counts["Other"] += frequency
+        
+        # Build question_categories list with format: name, value, color
+        question_categories = []
+        for category_name, count in category_counts.items():
+            if count > 0:  # Only include categories with questions
+                question_categories.append({
+                    "name": category_name,
+                    "value": count,
+                    "color": category_colors.get(category_name, "#6B7280")
+                })
+        
+        # Sort by value (descending)
+        question_categories.sort(key=lambda x: x["value"], reverse=True)
         
         return {
             "status": "success",
@@ -885,11 +1058,11 @@ async def get_category_statistics(
         
         # Define category keywords
         category_keywords = {
-            'Admission Requirements': ['admission', 'application', 'requirement', 'deadline', 'gpa', 'grade', 'apply', 'entrance'],
-            'Financial Aid': ['financial aid', 'scholarship', 'tuition', 'fee', 'cost', 'funding', 'loan', 'grant'],
-            'Academic Programs': ['program', 'major', 'course', 'curriculum', 'degree', 'bachelor', 'master', 'subject'],
-            'Campus Life': ['campus', 'dormitory', 'housing', 'student life', 'activities', 'club', 'facility', 'tour'],
-            'Career Services': ['career', 'internship', 'job placement', 'employment', 'graduation rate', 'alumni']
+            'Admission Requirements': ['admission', 'application', 'requirement', 'deadline', 'gpa', 'grade', 'apply', 'entrance', 'tuyển sinh', 'hồ sơ', 'điểm', 'yêu cầu', 'thời hạn', 'nộp', 'hạn chót', 'thủ tục', 'tuyển', 'điều kiện', 'học bạ', 'thi', 'hồ sơ', 'tài liệu'],
+            'Financial Aid': ['financial aid', 'scholarship', 'tuition', 'fee', 'cost', 'funding', 'loan', 'grant', 'học phí', 'tiền', 'bao nhiêu', 'học bổng', 'tài chính', 'vay', 'trợ cấp'],
+            'Academic Programs': ['program', 'major', 'course', 'curriculum', 'degree', 'bachelor', 'master', 'subject', 'ngành', 'chuyên ngành', 'khóa học', 'chương trình', 'học phần', 'bằng cấp', 'cử nhân', 'thạc sĩ', 'tiến sĩ', 'môn học', 'khoa', 'đào tạo'],
+            'Campus Life': ['campus', 'dormitory', 'housing', 'student life', 'activities', 'club', 'facility', 'tour', 'cơ sở', 'hoạt động', 'ký túc xá', 'câu lạc bộ', 'clb', 'khuôn viên', 'cơ sở vật chất', 'thư viện', 'nhà xe', 'canteen', 'nhà ăn', 'chỗ ở', 'ngoại khóa'],
+            'Career Services': ['career', 'internship', 'job placement', 'employment', 'graduation rate', 'alumni', 'nghề nghiệp', 'việc làm', 'thực tập', 'tốt nghiệp', 'cựu sinh viên', 'hỗ trợ việc làm', 'tư vấn nghề nghiệp', 'đầu ra', 'công ty', 'doanh nghiệp', 'lương', 'tuyển dụng', 'ra trường'],
         }
         
         # Initialize category stats
@@ -922,16 +1095,16 @@ async def get_category_statistics(
             
             # If not categorized, put in "Other"
             if not categorized:
-                if 'Other' not in category_stats:
-                    category_stats['Other'] = {
-                        'category': 'Other',
+                if 'Khác' not in category_stats:
+                    category_stats['Khác'] = {
+                        'category': 'Khác',
                         'total_questions': 0,
                         'total_times_asked': 0,
                         'unique_questions': []
                     }
-                category_stats['Other']['total_questions'] += 1
-                category_stats['Other']['total_times_asked'] += frequency
-                category_stats['Other']['unique_questions'].append({
+                category_stats['Khác']['total_questions'] += 1
+                category_stats['Khác']['total_times_asked'] += frequency
+                category_stats['Khác']['unique_questions'].append({
                     'question': question_row.message_text,
                     'frequency': frequency
                 })
@@ -985,14 +1158,15 @@ async def get_dashboard_metrics(
         ).filter(
             or_(
                 entities.Role.role_name == "Student",
-                entities.Role.role_name == "Parent"
+                entities.Role.role_name == "Parent",
+                entities.Role.role_name == "Customer"
             )
         ).count()
         
         # Active Live Chat Sessions: sessions with session_type = "live" and end_time IS NULL
         active_live_sessions = db.query(entities.ChatSession).filter(
             and_(
-                entities.ChatSession.session_type == "live",
+                entities.ChatSession.session_type == "chatlive",
                 entities.ChatSession.end_time.is_(None)
             )
         ).count()
@@ -1140,7 +1314,7 @@ async def get_admission_dashboard_stats(
         
         # 4. Drafted Articles
         drafted_articles = db.query(entities.Article).filter(
-            entities.Article.status == "drafted"
+            entities.Article.status == "draft"
         ).count()
         
         # 5. Weekly Article Publication Stats (last 7 days)
