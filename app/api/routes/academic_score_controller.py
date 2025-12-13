@@ -13,12 +13,29 @@ def upload_academic_score(
 ):
     if not current_user.customer_profile:
         raise HTTPException(status_code=403, detail="User is not a customer")
-        
-    db_academic_score = entities.AcademicScore(**academic_score.model_dump(), customer_id=current_user.user_id)
-    db.add(db_academic_score)
-    db.commit()
-    db.refresh(db_academic_score)
-    return db_academic_score
+    
+    # Check if academic score already exists for this user
+    existing_score = db.query(entities.AcademicScore).filter(
+        entities.AcademicScore.customer_id == current_user.user_id
+    ).first()
+    
+    if existing_score:
+        # Update existing score
+        for key, value in academic_score.model_dump().items():
+            setattr(existing_score, key, value)
+        db.commit()
+        db.refresh(existing_score)
+        return existing_score
+    else:
+        # Create new score
+        db_academic_score = entities.AcademicScore(
+            **academic_score.model_dump(), 
+            customer_id=current_user.user_id
+        )
+        db.add(db_academic_score)
+        db.commit()
+        db.refresh(db_academic_score)
+        return db_academic_score
 
 @router.get("/users/{user_id}/academic-scores", 
             response_model=schemas.AcademicScoreResponse)
