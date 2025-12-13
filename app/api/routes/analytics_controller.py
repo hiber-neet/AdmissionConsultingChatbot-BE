@@ -556,8 +556,10 @@ async def get_content_statistics(
     Get content statistics for content managers
     """
     try:
-        # Total articles count
-        total_articles = db.query(func.count(entities.Article.article_id)).scalar() or 0
+        # Total articles count (exclude deleted)
+        total_articles = db.query(func.count(entities.Article.article_id)).filter(
+            entities.Article.status != 'deleted'
+        ).scalar() or 0
         
         # Published articles count
         published_articles = db.query(func.count(entities.Article.article_id)).filter(
@@ -574,33 +576,40 @@ async def get_content_statistics(
             or_(entities.Article.status == 'review', entities.Article.status == 'pending')
         ).scalar() or 0
         
-        # Recent articles (last 10)
-        recent_articles = db.query(entities.Article).order_by(
+        # Recent articles (last 10, exclude deleted)
+        recent_articles = db.query(entities.Article).filter(
+            entities.Article.status != 'deleted'
+        ).order_by(
             desc(entities.Article.create_at)
         ).limit(10).all()
         
-        # Articles by major
+        # Articles by major (exclude deleted)
         articles_by_major = db.query(
             entities.Major.major_name,
             func.count(entities.Article.article_id).label('article_count')
         ).join(
             entities.Article, entities.Major.major_id == entities.Article.major_id
+        ).filter(
+            entities.Article.status != 'deleted'
         ).group_by(
             entities.Major.major_name
         ).all()
         
-        # Monthly trends - get articles created in last 6 months
+        # Monthly trends - get articles created in last 6 months (exclude deleted)
         six_months_ago = datetime.now() - timedelta(days=180)
         monthly_articles = db.query(
             func.date_trunc('month', entities.Article.create_at).label('month'),
             func.count(entities.Article.article_id).label('total_articles')
         ).filter(
-            entities.Article.create_at >= six_months_ago.date()
+            and_(
+                entities.Article.create_at >= six_months_ago.date(),
+                entities.Article.status != 'deleted'
+            )
         ).group_by(
             func.date_trunc('month', entities.Article.create_at)
         ).order_by('month').all()
         
-        # Get published articles count separately for each month
+        # Get published articles count separately for each month (already excludes deleted by status check)
         published_monthly = db.query(
             func.date_trunc('month', entities.Article.create_at).label('month'),
             func.count(entities.Article.article_id).label('published_articles')
