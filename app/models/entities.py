@@ -124,13 +124,12 @@ class LiveChatQueue(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     customer_id = Column(Integer, ForeignKey("Users.user_id"))
-    admission_official_id = Column(Integer, ForeignKey("Users.user_id"), nullable=True)
     status = Column(String, default="waiting")  # waiting, accepted, canceled
     created_at = Column(Date, default=datetime.now)
     
     # relationships
     customer = relationship("Users", foreign_keys=[customer_id])
-    admission_official = relationship("Users", foreign_keys=[admission_official_id])
+    
 
 class Interest(Base):
     __tablename__ = 'Interest'

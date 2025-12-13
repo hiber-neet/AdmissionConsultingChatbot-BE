@@ -483,7 +483,7 @@ class TrainingService:
 
             # 🧩 5. Commit 1 lần duy nhất
             db.commit()
-            self.update_faq_statistics(db, question_text = query, answer_text = full_response, intent_id = intent_id)
+            self.update_faq_statistics(db, question_text = message, answer_text = full_response, intent_id = intent_id)
             print(f"💾 Saved both user+bot messages for session {session_id}")
         except SQLAlchemyError as e:
             db.rollback()
@@ -767,7 +767,7 @@ class TrainingService:
                     must=[
                         models.FieldCondition(
                             key="question_id",
-                            match=models.MatchValue(qa_id)
+                            match=models.MatchValue(value = qa_id)
                         )
                     ]
                 )
@@ -896,7 +896,7 @@ class TrainingService:
                     must=[
                         models.FieldCondition(
                             key="document_id",
-                            match=models.MatchValue(document_id)
+                            match=models.MatchValue(value = document_id)
                         )
                     ]
                 )
@@ -1101,8 +1101,7 @@ class TrainingService:
         
         # STEP 1: Search training Q&A
         qa_results = self.search_training_qa(query, top_k=3)
-        print("answer: ")
-        print(qa_results[0].score)
+        
         # TIER 1: Perfect match (score > 0.7)
         if qa_results and qa_results[0].score > 0.7:
             top_match = qa_results[0]
