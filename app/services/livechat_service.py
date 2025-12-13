@@ -123,7 +123,7 @@ class LiveChatService:
     # ======================================================================
     # 1. CUSTOMER REQUEST QUEUE
     # ======================================================================
-    async def customer_join_queue(self, customer_id: int, official_id: int = None):
+    async def customer_join_queue(self, customer_id: int):
         db = SessionLocal()
         
         try:
@@ -133,44 +133,9 @@ class LiveChatService:
                 return {"error": "customer_not_found"}
             if not customer.status:
                 return {"error": "customer_banned"}
-            
-            # Auto-assign admission officer if not specified
-            if official_id is None:
-                # Find available admission officers (status=True, not banned)
-                available_officials = db.query(AdmissionOfficialProfile).join(
-                    Users, Users.user_id == AdmissionOfficialProfile.admission_official_id
-                ).filter(
-                    Users.status == True,  # Not banned
-                    AdmissionOfficialProfile.status == "available",
-                    AdmissionOfficialProfile.current_sessions < AdmissionOfficialProfile.max_sessions
-                ).order_by(
-                    AdmissionOfficialProfile.current_sessions.asc()  # Least loaded first
-                ).all()
-                
-                if not available_officials:
-                    return {"error": "no_officers_available", "message": "No admission officers are currently available. Please try again later."}
-                
-                # Assign to officer with least current sessions
-                official_id = available_officials[0].admission_official_id
-            else:
-                # Verify specified officer exists and is available
-                officer = db.query(AdmissionOfficialProfile).join(
-                    Users, Users.user_id == AdmissionOfficialProfile.admission_official_id
-                ).filter(
-                    AdmissionOfficialProfile.admission_official_id == official_id,
-                    Users.status == True
-                ).first()
-                
-                if not officer:
-                    return {"error": "official_not_found"}
-                if not officer.status == "available":
-                    return {"error": "official_not_available"}
-                if officer.current_sessions >= officer.max_sessions:
-                    return {"error": "official_at_capacity"}
 
             queue_entry = LiveChatQueue(
                 customer_id=customer_id,
-                admission_official_id=official_id,
                 status="waiting",
                 created_at=datetime.now()
             )
@@ -182,15 +147,15 @@ class LiveChatService:
             await self.send_customer_event(customer_id, {
                 "event": "queued",
                 "queue_id": queue_entry.id,
-                "official_id": official_id
+               
             })
 
             # Gửi update cho AO
-            await self.send_official_event(official_id, {
+            await self.send_official_event({
                 "event": "queue_updated"
             })
 
-            return {"success": True, "queue_id": queue_entry.id, "official_id": official_id, "status": "waiting"}
+            return {"success": True, "queue_id": queue_entry.id, "status": "waiting"}
             
         finally:
             db.close()
@@ -252,13 +217,22 @@ class LiveChatService:
         session_id = None
 
         try:
-            queue_item = db.query(LiveChatQueue).filter_by(id=queue_id).first()
+            queue_item = (
+            db.query(LiveChatQueue)
+            .filter(LiveChatQueue.id == queue_id)
+            .with_for_update()
+            .first()
+            )
             if not queue_item:
                 return {"error": "queue_not_found"}
-
-            official = db.query(AdmissionOfficialProfile).filter_by(
-                admission_official_id=official_id
-            ).first()
+            if(queue_item.status != "waiting"):
+                return {"error": "queue_not_available"}
+            official = (
+            db.query(AdmissionOfficialProfile)
+            .filter_by(admission_official_id=official_id)
+            .with_for_update()
+            .first()
+            )
             
             if not official:
                 return {"error": "official_not_found"}
@@ -284,7 +258,7 @@ class LiveChatService:
             db.refresh(session)
             session_id = session.chat_session_id
             
-            print(f"[Accept] ✅ Created session_id: {session_id}")
+            print(f"[Accept] Created session_id: {session_id}")
 
             # Create participants
             participant1 = ParticipateChatSession(user_id=customer_id, session_id=session_id)
@@ -298,7 +272,7 @@ class LiveChatService:
             db.commit()
 
             # CRITICAL: Send SSE event to CUSTOMER with session_id
-            print(f"[Accept] 📤 Sending 'accepted' SSE to customer {customer_id} with session_id={session_id}")
+            print(f"[Accept] Sending 'accepted' SSE to customer {customer_id} with session_id={session_id}")
             await self.send_customer_event(customer_id, {
                 "event": "accepted",
                 "session_id": session_id,
@@ -307,7 +281,7 @@ class LiveChatService:
             })
 
             # SSE → update queue list for admission official
-            print(f"[Accept] 📤 Sending 'queue_updated' SSE to official {official_id}")
+            print(f"[Accept] Sending 'queue_updated' SSE to official {official_id}")
             await self.send_official_event(official_id, {
                 "event": "queue_updated"
             })
@@ -324,7 +298,7 @@ class LiveChatService:
             
             db.close()
             
-            print(f"[Accept] 🎉 Returning result dict with session_id={session_id} to API")
+            print(f"[Accept] Returning result dict with session_id={session_id} to API")
             print(f"[Accept] ===== ACCEPTANCE COMPLETE =====\n")
             
             return result

@@ -10,6 +10,8 @@ alembic==1.13.0               # Database migrations
 python-dotenv==1.0.0          # Environment variables
 sse-starlette==2.1.0
 
+
+cloudinary
 pydantic            # Schema validation
 pydantic-settings==2.10.1      # Settings management
 python-multipart==0.0.6       # File upload handling
@@ -26,7 +28,6 @@ langchain_text_splitters
 
 qdrant-client==1.15.1
 sentence-transformers==5.1.1
-
 
 python-jose[cryptography]==3.3.0  # JWT tokens
 passlib[bcrypt]==1.7.4            # Password hashing
