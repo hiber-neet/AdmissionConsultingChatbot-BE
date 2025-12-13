@@ -13,13 +13,8 @@ live_chat_service = LiveChatService()
 router = APIRouter(prefix="/livechat", tags=["Live Chat"])
 
 @router.post("/live-chat/join_queue")
-async def join_queue(customer_id: int, official_id: int = None):
-    """
-    Customer joins live chat queue.
-    If official_id is provided, assigns to that specific officer.
-    If official_id is None, automatically assigns to available officer with least load.
-    """
-    return await live_chat_service.customer_join_queue(customer_id, official_id)
+async def join_queue(customer_id: int):
+    return await live_chat_service.customer_join_queue(customer_id)
 
 #xem trang thai 
 @router.get("/customer/queue/status/{customer_id}")
