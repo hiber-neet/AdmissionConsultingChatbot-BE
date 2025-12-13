@@ -1175,7 +1175,7 @@ async def get_dashboard_metrics(
         # Active Live Chat Sessions: sessions with session_type = "live" and end_time IS NULL
         active_live_sessions = db.query(entities.ChatSession).filter(
             and_(
-                entities.ChatSession.session_type == "chatlive",
+                entities.ChatSession.session_type == "live",
                 entities.ChatSession.end_time.is_(None)
             )
         ).count()
