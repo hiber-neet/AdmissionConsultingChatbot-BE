@@ -448,6 +448,53 @@ def unban_user(
     return {"message": "User has been unbanned"}
 
 
+@router.get("/{user_id}")
+def get_user_by_id(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: Users = Depends(get_current_user)
+):
+    """
+    Get a single user by ID.
+    Requires admin or admission official permission.
+    """
+    if not current_user or not is_admin_or_admission_official(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin or admission official permission required"
+        )
+
+    # Find user with relationships loaded
+    user = db.query(Users).options(
+        selectinload(Users.permissions),
+        selectinload(Users.role)
+    ).filter(Users.user_id == user_id).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with ID {user_id} not found"
+        )
+
+    # Return user data in same format as students/staffs endpoints
+    return {
+        "user_id": user.user_id,
+        "full_name": user.full_name,
+        "email": user.email,
+        "phone_number": user.phone_number,
+        "status": user.status,
+        "role_id": user.role_id,
+        "role_name": user.role.role_name if user.role else None,
+        "password": user.password,  # Include for compatibility
+        "permissions": [
+            {
+                "permission_name": p.permission_name, 
+                "permission_id": p.permission_id
+            } for p in user.permissions
+        ] if user.permissions else [],
+    }
+
+
 @router.put("/{user_id}")
 def update_user(
     user_id: int,
