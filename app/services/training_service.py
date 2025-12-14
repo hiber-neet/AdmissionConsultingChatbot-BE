@@ -452,10 +452,7 @@ class TrainingService:
             async for chunk in self.llm.astream(prompt):
                 text = chunk.content or ""
                 full_response += text
-                yield {
-                    "type": "chunk",
-                    "content": str(text)
-                }
+                yield text
                 await asyncio.sleep(0)  # Nhường event loop
             print(full_response)
             memory.save_context({"input": query}, {"output": full_response})  
@@ -473,11 +470,6 @@ class TrainingService:
             db.flush()
             # 🧩 5. Commit 1 lần duy nhất
             db.commit()
-            yield {
-                "type": "done",
-                "bot_interaction_id": bot_msg.interaction_id,
-                "question_id": user_msg.interaction_id
-            }
             self.update_faq_statistics(db, bot_msg.interaction_id, intent_id = intent_id)
             print(f"💾 Saved both user+bot messages for session {session_id}")
         except SQLAlchemyError as e:
@@ -548,10 +540,7 @@ class TrainingService:
             async for chunk in self.llm.astream(prompt):
                 text = chunk.content or ""
                 full_response += text
-                yield {
-                    "type": "chunk",
-                    "content": str(text)
-                }
+                yield text
                 await asyncio.sleep(0)  # Nhường event loop
 
             memory.save_context({"input": query}, {"output": full_response})  
@@ -570,11 +559,7 @@ class TrainingService:
             db.flush()
             # 🧩 5. Commit 1 lần duy nhất
             db.commit()
-            yield {
-                "type": "done",
-                "bot_interaction_id": bot_msg.interaction_id,
-                "question_id": user_msg.interaction_id
-            }
+            
             self.update_faq_statistics(db, bot_msg.interaction_id, intent_id = intent_id)
             print(f"💾 Saved both user+bot messages for session {session_id}")
         except SQLAlchemyError as e:
@@ -675,10 +660,7 @@ class TrainingService:
             async for chunk in self.llm.astream(prompt):
                 text = chunk.content or ""
                 full_response += text
-                yield {
-                    "type": "chunk",
-                    "content": str(text)
-                }
+                yield text
                 await asyncio.sleep(0)  # Nhường event loop
 
             memory.save_context({"input": query}, {"output": full_response})  
@@ -697,11 +679,7 @@ class TrainingService:
             db.flush()
             # 🧩 5. Commit 1 lần duy nhất
             db.commit()
-            yield {
-                "type": "done",
-                "bot_interaction_id": bot_msg.interaction_id,
-                "question_id": user_msg.interaction_id
-            }
+            
             print(f"💾 Saved both user+bot messages for session {session_id}")
         except SQLAlchemyError as e:
             db.rollback()
