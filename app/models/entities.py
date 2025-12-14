@@ -319,7 +319,7 @@ class ChatInteraction(Base):
     # Relationships
     user = relationship('Users', back_populates='chat_interactions')
     session = relationship('ChatSession', back_populates='interactions')
-
+    faq_statistics = relationship('FaqStatistics', back_populates='interaction')
 
 # =====================
 # INTENT, FAQ, RECOMMENDATION, TRAINING QA
@@ -340,15 +340,12 @@ class Intent(Base):
 class FaqStatistics(Base):
     __tablename__ = 'FaqStatistics'
     
-    faq_id = Column(Integer, primary_key=True, autoincrement=True)
-    usage_count = Column(Integer, default=0)
-    success_rate = Column(Float)
-    question_text = Column(String)
-    answer_text = Column(String)
-    rating = Column(Integer)
+    faq_id = Column(Integer, primary_key=True, autoincrement=True)  
+    response_from_chat_id = Column(Integer, ForeignKey(ChatInteraction.interaction_id))
     last_used_at = Column(Date)
     intent_id = Column(Integer, ForeignKey('Intent.intent_id'))
-    
+
+    interaction = relationship('ChatInteraction', back_populates='faq_statistics')
     intent = relationship('Intent', back_populates='faq_statistics')
 
 
