@@ -240,18 +240,6 @@ def api_delete_chat_session(session_id: int, user_id: int | None = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("message/feedback")
-def submit_feedback(
-    
-    db: Session = Depends(get_db),
-    user=Depends(get_current_user)
-):
-    return chat_service.submit_message_feedback(
-        db=db,
-        message_id=payload.message_id,
-        user_id=user.user_id,
-        rating=payload.rating
-    )
 
 
 
