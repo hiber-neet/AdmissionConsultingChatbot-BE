@@ -409,7 +409,7 @@ class TrainingService:
                     session_id=session_id
                 )
                 db.add(user_msg)
-                db.refresh(user_msg) 
+                db.flush()
             else:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
@@ -421,7 +421,7 @@ class TrainingService:
                     session_id=session_id
                 )
                 db.add(user_msg)
-                db.refresh(user_msg) 
+                db.flush()
             memory = memory_service.get_memory(session_id)
             mem_vars = memory.load_memory_variables({})
             chat_history = mem_vars.get("chat_history", "")
@@ -470,7 +470,7 @@ class TrainingService:
                 session_id=session_id
             )
             db.add(bot_msg)
-            db.refresh(bot_msg)
+            db.flush()
             # 🧩 5. Commit 1 lần duy nhất
             db.commit()
             yield {
@@ -500,7 +500,7 @@ class TrainingService:
                     session_id=session_id
                 )
                 db.add(user_msg)
-                db.refresh(user_msg)
+                db.flush()
             else:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
@@ -512,7 +512,7 @@ class TrainingService:
                     session_id=session_id
                 )
                 db.add(user_msg)
-                db.refresh(user_msg)
+                db.flush()
             memory = memory_service.get_memory(session_id)
             mem_vars = memory.load_memory_variables({})
             chat_history = mem_vars.get("chat_history", "")
@@ -567,7 +567,7 @@ class TrainingService:
                 session_id=session_id
             )
             db.add(bot_msg)
-            db.refresh(bot_msg)
+            db.flush()
             # 🧩 5. Commit 1 lần duy nhất
             db.commit()
             yield {
@@ -603,7 +603,7 @@ class TrainingService:
                     session_id=session_id
                 )
                 db.add(user_msg)
-                db.refresh(user_msg)  
+                db.flush()
             else:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
@@ -615,7 +615,7 @@ class TrainingService:
                     session_id=session_id
                 )
                 db.add(user_msg)
-                db.refresh(user_msg)
+                db.flush()
             memory = memory_service.get_memory(session_id)
             mem_vars = memory.load_memory_variables({})
             chat_history = mem_vars.get("chat_history", "")
@@ -694,7 +694,7 @@ class TrainingService:
                 session_id=session_id
             )
             db.add(bot_msg)
-            db.refresh(bot_msg)
+            db.flush()
             # 🧩 5. Commit 1 lần duy nhất
             db.commit()
             yield {
