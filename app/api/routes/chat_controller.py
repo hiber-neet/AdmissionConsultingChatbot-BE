@@ -126,11 +126,10 @@ async def websocket_chat(websocket: WebSocket):
                     async for chunk in service.stream_response_from_context(
                         enriched_query, context, session_id, user_id, intent_id, message
                     ):
-                        if chunk["type"] != "chunk":
-                            await websocket.send_text({
-                                "event": "chunk",
-                                "content": chunk["content"]
-                            })
+                        await websocket.send_text(json.dumps({
+                            "event": "chunk",
+                            "content": getattr(chunk, "content", str(chunk))
+                        }))
                     # Gửi tín hiệu kết thúc khi hoàn tất
                     try:
                         await websocket.send_json({

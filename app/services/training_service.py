@@ -409,7 +409,7 @@ class TrainingService:
                     session_id=session_id
                 )
                 db.add(user_msg)
-                db.refersh(user_msg) 
+                db.flush()
             else:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
@@ -421,7 +421,7 @@ class TrainingService:
                     session_id=session_id
                 )
                 db.add(user_msg)
-                db.refersh(user_msg) 
+                db.flush()
             memory = memory_service.get_memory(session_id)
             mem_vars = memory.load_memory_variables({})
             chat_history = mem_vars.get("chat_history", "")
@@ -452,10 +452,7 @@ class TrainingService:
             async for chunk in self.llm.astream(prompt):
                 text = chunk.content or ""
                 full_response += text
-                yield {
-                    "type": "chunk",
-                    "content": str(text)
-                }
+                yield text
                 await asyncio.sleep(0)  # Nhường event loop
             print(full_response)
             memory.save_context({"input": query}, {"output": full_response})  
@@ -470,14 +467,9 @@ class TrainingService:
                 session_id=session_id
             )
             db.add(bot_msg)
-            db.refersh(bot_msg)
+            db.flush()
             # 🧩 5. Commit 1 lần duy nhất
             db.commit()
-            yield {
-                "type": "done",
-                "bot_interaction_id": bot_msg.interaction_id,
-                "question_id": user_msg.interaction_id
-            }
             self.update_faq_statistics(db, bot_msg.interaction_id, intent_id = intent_id)
             print(f"💾 Saved both user+bot messages for session {session_id}")
         except SQLAlchemyError as e:
@@ -500,7 +492,7 @@ class TrainingService:
                     session_id=session_id
                 )
                 db.add(user_msg)
-                db.refresh(user_msg)
+                db.flush()
             else:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
@@ -512,7 +504,7 @@ class TrainingService:
                     session_id=session_id
                 )
                 db.add(user_msg)
-                db.refresh(user_msg)
+                db.flush()
             memory = memory_service.get_memory(session_id)
             mem_vars = memory.load_memory_variables({})
             chat_history = mem_vars.get("chat_history", "")
@@ -548,10 +540,7 @@ class TrainingService:
             async for chunk in self.llm.astream(prompt):
                 text = chunk.content or ""
                 full_response += text
-                yield {
-                    "type": "chunk",
-                    "content": str(text)
-                }
+                yield text
                 await asyncio.sleep(0)  # Nhường event loop
 
             memory.save_context({"input": query}, {"output": full_response})  
@@ -567,14 +556,10 @@ class TrainingService:
                 session_id=session_id
             )
             db.add(bot_msg)
-            db.refresh(bot_msg)
+            db.flush()
             # 🧩 5. Commit 1 lần duy nhất
             db.commit()
-            yield {
-                "type": "done",
-                "bot_interaction_id": bot_msg.interaction_id,
-                "question_id": user_msg.interaction_id
-            }
+            
             self.update_faq_statistics(db, bot_msg.interaction_id, intent_id = intent_id)
             print(f"💾 Saved both user+bot messages for session {session_id}")
         except SQLAlchemyError as e:
@@ -603,7 +588,7 @@ class TrainingService:
                     session_id=session_id
                 )
                 db.add(user_msg)
-                db.refesh(user_msg)  
+                db.flush()
             else:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
@@ -615,7 +600,7 @@ class TrainingService:
                     session_id=session_id
                 )
                 db.add(user_msg)
-                db.refesh(user_msg)
+                db.flush()
             memory = memory_service.get_memory(session_id)
             mem_vars = memory.load_memory_variables({})
             chat_history = mem_vars.get("chat_history", "")
@@ -675,10 +660,7 @@ class TrainingService:
             async for chunk in self.llm.astream(prompt):
                 text = chunk.content or ""
                 full_response += text
-                yield {
-                    "type": "chunk",
-                    "content": str(text)
-                }
+                yield text
                 await asyncio.sleep(0)  # Nhường event loop
 
             memory.save_context({"input": query}, {"output": full_response})  
@@ -694,14 +676,10 @@ class TrainingService:
                 session_id=session_id
             )
             db.add(bot_msg)
-            db.refesh(bot_msg)
+            db.flush()
             # 🧩 5. Commit 1 lần duy nhất
             db.commit()
-            yield {
-                "type": "done",
-                "bot_interaction_id": bot_msg.interaction_id,
-                "question_id": user_msg.interaction_id
-            }
+            
             print(f"💾 Saved both user+bot messages for session {session_id}")
         except SQLAlchemyError as e:
             db.rollback()
