@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends
 import asyncio
 import json
 from app.models.database import SessionLocal
