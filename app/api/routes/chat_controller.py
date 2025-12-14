@@ -126,10 +126,11 @@ async def websocket_chat(websocket: WebSocket):
                     async for chunk in service.stream_response_from_context(
                         enriched_query, context, session_id, user_id, intent_id, message
                     ):
-                        await websocket.send_text(json.dumps({
-                            "event": "chunk",
-                            "content": getattr(chunk, "content", str(chunk))
-                        }))
+                        if chunk["type"] != "chunk":
+                            await websocket.send_text({
+                                "event": "chunk",
+                                "content": chunk["content"]
+                            })
                     # Gửi tín hiệu kết thúc khi hoàn tất
                     try:
                         await websocket.send_json({
@@ -169,21 +170,13 @@ async def websocket_chat(websocket: WebSocket):
                     break
 
             if tier_source == "nope":
-                db = SessionLocal()
-                try:
-                    service.update_faq_statistics(
-                        db,
-                        question_text=enriched_query,
-                        answer_text=None,
-                        intent_id=0  
-                    )
-                finally:
-                    db.close()
+                print("floor 5: nope layer")
+                
                 # 🧯 6️⃣ fallback cuối cùng
                 await websocket.send_json({
                     "event": "chunk",
                     "content": "Hiện tại mình chưa tìm thấy thông tin phù hợp với câu hỏi này trong hệ thống. "
-            "Bạn có thể đặt câu hỏi rõ hơn hoặc liên hệ trực tiếp chuyên viên tuyển sinh để được hỗ trợ chi tiết hơn nhé!"
+            "Bạn có thể liên hệ trực tiếp chuyên viên tuyển sinh để được hỗ trợ chi tiết hơn nhé!"
                 })
                 await websocket.send_json({
                     "event": "done",
@@ -248,8 +241,18 @@ def api_delete_chat_session(session_id: int, user_id: int | None = None):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
+@router.post("message/feedback")
+def submit_feedback(
+    
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user)
+):
+    return chat_service.submit_message_feedback(
+        db=db,
+        message_id=payload.message_id,
+        user_id=user.user_id,
+        rating=payload.rating
+    )
 
 
 

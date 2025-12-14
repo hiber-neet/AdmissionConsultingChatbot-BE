@@ -437,28 +437,28 @@ class LiveChatService:
             if not session:
                 return {"error": "session_not_found"}
 
-            # Check if session is already ended
+            # Đã kết thúc rồi thì thôi
             if session.end_time is not None:
                 return {"error": "session_already_ended"}
 
-            # Verify that the user ending the session is a participant
+            # Người kết thúc phải là participant
             participant = db.query(ParticipateChatSession).filter(
                 ParticipateChatSession.session_id == session_id,
                 ParticipateChatSession.user_id == ended_by
             ).first()
-            
             if not participant:
                 return {"error": "not_session_participant"}
 
-            # Find all participants to identify the official
+            # Lấy toàn bộ participant để:
+            # - tìm official
+            # - gửi SSE cho tất cả
             all_participants = db.query(ParticipateChatSession).filter(
                 ParticipateChatSession.session_id == session_id
             ).all()
 
-            # Find the official (check if any participant is an admission official)
+            # Tìm official (nếu có)
             official_id = None
             for p in all_participants:
-                # Check if this user is an admission official
                 profile = db.query(AdmissionOfficialProfile).filter_by(
                     admission_official_id=p.user_id
                 ).first()
@@ -466,10 +466,10 @@ class LiveChatService:
                     official_id = p.user_id
                     break
 
-            # End the session
+            # Kết thúc phiên
             session.end_time = datetime.now().date()
-            
-            # Decrease official's current session count if found
+
+            # Giảm current_sessions của official
             if official_id:
                 profile = db.query(AdmissionOfficialProfile).filter_by(
                     admission_official_id=official_id
@@ -479,21 +479,34 @@ class LiveChatService:
 
             db.commit()
 
-            # Push realtime notification to all connected participants
+            # Payload chung thông báo kết thúc
             payload = {
                 "event": "chat_ended",
                 "session_id": session_id,
                 "ended_by": ended_by
             }
 
+            # 1️⃣ Gửi qua WebSocket cho tất cả connection trong session
             for conn in self.active_sessions.get(session_id, []):
-                await conn.send_json(payload)
+                try:
+                    await conn.send_json(payload)
+                except Exception as e:
+                    print(f"[End Session] WS send error: {e}")
 
-            # Cleanup WebSocket connections
+            # 2️⃣ Gửi qua SSE cho tất cả user tham gia (học sinh + officer nếu đang mở SSE)
+            participant_ids = [p.user_id for p in all_participants]
+            for uid in participant_ids:
+                try:
+                    await self.send_customer_event(uid, payload)
+                    await self.send_official_event(uid, payload)
+                except Exception as e:
+                    print(f"[End Session] SSE error for user {uid}: {e}")
+
+            # Dọn WebSocket
             self.active_sessions.pop(session_id, None)
 
             return {"success": True}
-            
+
         except Exception as e:
             db.rollback()
             return {"error": f"database_error: {str(e)}"}
