@@ -24,6 +24,9 @@ services:
       - LLM_MODEL=${LLM_MODEL}
       - SECRET_KEY=${SECRET_KEY}
       - ALGORITHM=${ALGORITHM}
+      - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
+      - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
+      - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
       # Các key khác sẽ tự load từ file .env
     env_file:
       - .env
