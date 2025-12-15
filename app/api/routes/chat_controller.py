@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends
 import asyncio
 import json
 from app.models.database import SessionLocal
@@ -239,9 +239,3 @@ def api_delete_chat_session(session_id: int, user_id: int | None = None):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-
-
-
