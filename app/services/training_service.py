@@ -1107,8 +1107,6 @@ class TrainingService:
         
         # TIER 2: No training Q&A match, try documents
         doc_results = self.search_documents(query, top_k=5)
-        print("score document:")
-        print(doc_results[0].score)
         if doc_results and len(doc_results) > 0: 
             return {
                     "response": doc_results,
