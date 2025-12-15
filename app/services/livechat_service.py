@@ -125,7 +125,6 @@ class LiveChatService:
     # ======================================================================
     async def customer_join_queue(self, customer_id: int):
         db = SessionLocal()
-        
         try:
             # Check if customer is banned
             customer = db.query(Users).filter(Users.user_id == customer_id).first()
@@ -147,16 +146,20 @@ class LiveChatService:
             await self.send_customer_event(customer_id, {
                 "event": "queued",
                 "queue_id": queue_entry.id,
-               
             })
 
-            # Gửi update cho AO
-            await self.send_official_event({
-                "event": "queue_updated"
-            })
+            # HÀNG CHỜ CHUNG: broadcast cho TẤT CẢ official đang mở SSE
+            for oid in list(self.sse_officials.keys()):
+                await self.send_official_event(oid, {
+                    "event": "queue_updated"
+                })
 
-            return {"success": True, "queue_id": queue_entry.id, "status": "waiting"}
-            
+            return {
+                "success": True,
+                "queue_id": queue_entry.id,
+                "status": "waiting"
+            }
+
         finally:
             db.close()
 
@@ -164,13 +167,8 @@ class LiveChatService:
     # 1B. CUSTOMER CANCEL QUEUE REQUEST
     # ======================================================================
     async def customer_cancel_queue(self, customer_id: int):
-        """
-        Cancel a customer's pending queue request.
-        Only works if status is 'waiting' (before acceptance).
-        """
         db = SessionLocal()
         try:
-            # Find customer's pending queue entry
             queue_entry = db.query(LiveChatQueue).filter(
                 LiveChatQueue.customer_id == customer_id,
                 LiveChatQueue.status == "waiting"
@@ -179,7 +177,6 @@ class LiveChatService:
             if not queue_entry:
                 return {"error": "no_pending_queue_request"}
             
-            official_id = queue_entry.admission_official_id
             queue_id = queue_entry.id
             
             # Mark as canceled
@@ -193,9 +190,9 @@ class LiveChatService:
                 "message": "You have canceled your queue request"
             })
             
-            # Notify admission official about queue update
-            if official_id:
-                await self.send_official_event(official_id, {
+            # HÀNG CHỜ CHUNG: thông báo cho TẤT CẢ tư vấn viên
+            for oid in list(self.sse_officials.keys()):
+                await self.send_official_event(oid, {
                     "event": "queue_updated",
                     "message": f"Customer {customer_id} canceled their request"
                 })
@@ -532,22 +529,19 @@ class LiveChatService:
         return True
 
     def get_queue_list(self, official_id: int):
+        """Hàng chờ chung cho tất cả tư vấn viên"""
         db = SessionLocal()
-        items = db.query(LiveChatQueue).filter_by(
-            admission_official_id=official_id,
-            status="waiting"
+        items = db.query(LiveChatQueue).filter(
+            LiveChatQueue.status == "waiting"
         ).options(
-            # Eagerly load customer information
             joinedload(LiveChatQueue.customer)
         ).all()
         
-        # Transform to include customer info
         result = []
         for item in items:
             queue_item_dict = {
                 'id': item.id,
                 'customer_id': item.customer_id,
-                'admission_official_id': item.admission_official_id,
                 'status': item.status,
                 'created_at': item.created_at.isoformat() if item.created_at else None,
                 'customer': {
@@ -556,7 +550,7 @@ class LiveChatService:
                     'phone_number': item.customer.phone_number if item.customer else 'N/A'
                 } if item.customer else {
                     'full_name': f'Customer {item.customer_id}',
-                    'email': 'N/A', 
+                    'email': 'N/A',
                     'phone_number': 'N/A'
                 }
             }
@@ -564,13 +558,11 @@ class LiveChatService:
         
         db.close()
         return result
-    
+
     async def get_active_sessions(self, official_id: int):
         """Get all active chat sessions for an admission official"""
         db = SessionLocal()
         try:
-            # Query for sessions where the official is a participant
-            # Use start_time and end_time to determine active status (started but not ended)
             active_sessions_query = db.query(
                 ChatSession.chat_session_id,
                 ChatSession.start_time,
@@ -580,15 +572,14 @@ class LiveChatService:
                 ChatSession.chat_session_id == ParticipateChatSession.session_id
             ).filter(
                 ParticipateChatSession.user_id == official_id,
-                ChatSession.start_time.isnot(None),  # Session has started
-                ChatSession.end_time.is_(None)  # Session hasn't ended (active)
+                ChatSession.start_time.isnot(None),
+                ChatSession.end_time.is_(None)
             ).all()
             
             result = []
             for session in active_sessions_query:
                 session_id, start_time, session_type = session
                 
-                # For each session, find the customer (the other participant)
                 customer_participant = db.query(
                     ParticipateChatSession, Users.full_name
                 ).join(

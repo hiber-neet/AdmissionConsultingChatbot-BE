@@ -79,7 +79,7 @@ async def websocket_chat(websocket: WebSocket):
             confidence = result.get("confidence", 0.0)
 
             # === TIER 1: training_qa - score > 0.8 ===
-            if tier_source == "training_qa" and confidence > 0.8:
+            if tier_source == "training_qa" and confidence > 0.7:
                 print("floor 1")
                 top = result["top_match"]
                 q_text = top.payload.get("question_text")
@@ -239,8 +239,3 @@ def api_delete_chat_session(session_id: int, user_id: int | None = None):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-
-

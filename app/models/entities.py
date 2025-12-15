@@ -56,7 +56,6 @@ class Users(Base):
 
     # chat, recommendations
     chat_interactions = relationship('ChatInteraction', back_populates='user', cascade="all, delete-orphan")
-    personalized_recommendations = relationship('PersonalizedRecommendation', back_populates='user', cascade="all, delete-orphan")
     participate_sessions = relationship('ParticipateChatSession', back_populates='user')
     # training QA created/approved (two distinct relations)
     training_question_answers_created = relationship(
@@ -164,30 +163,6 @@ class AcademicScore(Base):
 # =====================
 # RIASEC
 # =====================
-class RiasecTrait(Base):
-    __tablename__ = "RiasecTrait"
-    
-    trait_code_id = Column(Integer, primary_key=True, autoincrement=True)
-    trait_code_name = Column(String, nullable=False)
-    description = Column(String)
-    
-    # Relationships
-    questions = relationship('RiasecQuestion', back_populates='trait', cascade="all, delete-orphan")
-
-
-class RiasecQuestion(Base):
-    __tablename__ = 'RiasecQuestion'
-    
-    question_id = Column(Integer, primary_key=True, autoincrement=True)
-    question_name = Column(String, nullable=False)
-    trait_code_id = Column(Integer, ForeignKey('RiasecTrait.trait_code_id'), nullable=False)
-    
-    # Relationships
-    trait = relationship('RiasecTrait', back_populates='questions')
-
-
-
-
 
 
 class RiasecResult(Base):
@@ -344,22 +319,11 @@ class FaqStatistics(Base):
     response_from_chat_id = Column(Integer, ForeignKey(ChatInteraction.interaction_id))
     last_used_at = Column(Date)
     intent_id = Column(Integer, ForeignKey('Intent.intent_id'))
-
+    usage_count = Column(Integer)
     interaction = relationship('ChatInteraction', back_populates='faq_statistics')
     intent = relationship('Intent', back_populates='faq_statistics')
 
 
-class PersonalizedRecommendation(Base):
-    __tablename__ = 'PersonalizedRecommendation'
-    
-    recommendation_id = Column(Integer, primary_key=True, autoincrement=True)
-    confidence_score = Column(Float)
-    user_id = Column(Integer, ForeignKey('Users.user_id'))
-    base_intent_id = Column(Integer, ForeignKey("Intent.intent_id"))
-    suggested_intent_id = Column(Integer, ForeignKey("Intent.intent_id"))
-    session_id = Column(Integer, ForeignKey("ChatSession.chat_session_id"))
-    
-    user = relationship('Users', back_populates='personalized_recommendations')
 
 
 class TrainingQuestionAnswer(Base):
