@@ -122,42 +122,50 @@ async def upload_document(
     current_user_id: int = Form(1),
     db: Session = Depends(get_db)
 ):
-    print(f"intent_id: {intend_id}")
-    print(f"userid: {current_user_id}")
+    print(f"\n[1] BẮT ĐẦU REQUEST Upload. Filename: {file.filename}", flush=True)
     # STEP 1: VALIDATE FILE
     try:
+        print("[2] Đang gọi validate_file...", flush=True)
         is_valid, error_msg = documentProcessor.validate_file(file.filename, file.content_type)
         if not is_valid:
+            print(f"[FAIL] Validate thất bại: {error_msg}", flush=True)
             raise HTTPException(status_code=400, detail=error_msg)
     except Exception as e:
+        print(f"[ERROR] Lỗi tại bước Validate: {e}", flush=True)
         raise HTTPException(status_code=400, detail=str(e))
     
     # STEP 2: READ FILE
     try:
+        print("[3] Đang đọc file vào RAM (await file.read())...", flush=True)
         file_content = await file.read()
-
+        print(f"[4] Đọc file XONG. Kích thước: {len(file_content)} bytes", flush=True)
         if len(file_content) > 50 * 1024 * 1024:
             raise HTTPException(status_code=413, detail="File too large (max 50MB)")
     except Exception as e:
+        print(f"[ERROR] Lỗi khi đọc file: {e}", flush=True)
         raise HTTPException(status_code=400, detail=f"Failed to read file: {str(e)}")
 
     # STEP 3: EXTRACT TEXT
     try:
+        print("[5] Đang gọi extract_text (Xử lý PDF/OCR)...", flush=True)
         extracted_text = documentProcessor.extract_text(
             file_content,
             file.filename,
             file.content_type
         )
+        print(f"[6] Extract XONG. Kết quả text dài: {len(extracted_text) if extracted_text else 0}", flush=True)
         if not extracted_text:
             raise HTTPException(
                 status_code=422,
                 detail="Cannot extract content from the file"
             )
     except Exception as e:
+        print(f"[ERROR] Lỗi tại extract_text: {e}", flush=True)
         raise HTTPException(status_code=422, detail=f"Extract error: {str(e)}")
 
     # STEP 4: SAVE FILE TO DISK
     try:
+        print("[7] Đang lưu file xuống đĩa...", flush=True)
         upload_dir = Path("uploads")
         upload_dir.mkdir(exist_ok=True)
 
@@ -165,13 +173,15 @@ async def upload_document(
         file_path = upload_dir / unique_filename
         with open(file_path, "wb") as f:
             f.write(file_content)
+        print(f"[8] Lưu file XONG tại: {file_path}", flush=True)
     except Exception as e:
+        print(f"[ERROR] Lỗi khi lưu đĩa: {e}", flush=True)
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
     # STEP 5: SAVE DATABASE ONLY (NO QDRANT)
     try:
         service = TrainingService()
-
+        print("[9] Đang lưu vào Database...", flush=True)
         doc = service.create_document(
             db=db,
             title=title or file.filename,
@@ -186,6 +196,7 @@ async def upload_document(
             f.write(extracted_text)
 
     except Exception as e:
+        print(f"[ERROR] Lỗi Database: {e}", flush=True)
         db.rollback()
         raise HTTPException(status_code=500, detail=f"DB error: {str(e)}")
 
