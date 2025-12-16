@@ -1702,3 +1702,116 @@ async def get_system_health(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting system health: {str(e)}")
+
+@router.get("/intent-asked-statistics")
+async def get_intent_stats(db: Session = Depends(get_db)):
+    # --- BƯỚC 1: LẤY DỮ LIỆU TỪ CÁC BẢNG (Chỉ đọc, không sửa DB) ---
+    
+    # 1.1 Lấy Intent
+    intents = db.query(entities.Intent).filter(entities.Intent.is_deleted == False).all()
+    
+    # 1.2 Lấy Training Data (Câu hỏi mẫu)
+    training_data = db.query(entities.TrainingQuestionAnswer).all()
+    
+    # 1.3 Lấy Document (Chỉ lấy Title để match, không lấy nội dung file vì quá nặng)
+    documents = db.query(entities.KnowledgeBaseDocument).all()
+    
+    # 1.4 Lấy User Messages (Giới hạn 2000 tin mới nhất để giữ performance)
+    user_messages = db.query(entities.ChatInteraction).filter(
+        (entities.ChatInteraction.is_from_bot == False) | (entities.ChatInteraction.is_from_bot == None)
+    ).order_by(entities.ChatInteraction.interaction_id.desc()).limit(2000).all()
+
+    # --- BƯỚC 2: XÂY DỰNG TỪ ĐIỂN TỪ KHÓA (CÓ LỌC NHIỄU & TÁCH TỪ) ---
+    intent_keywords_map = {}
+    
+    # Helper để add keyword an toàn (ĐÃ NÂNG CẤP)
+    # Thêm tham số split_words: Nếu True, sẽ tách câu thành từng từ đơn để bắt dính tốt hơn
+    def add_safe_keyword(intent_id, raw_kw, split_words=False):
+        if not raw_kw: return
+        kw_full = raw_kw.lower().strip()
+        
+        # 1. Luôn thêm cụm từ nguyên bản (VD: "chuyên ngành")
+        # Bỏ qua từ khóa quá ngắn (< 2 ký tự) trừ khi là số hoặc từ đặc biệt
+        if len(kw_full) >= 2: 
+            intent_keywords_map[intent_id]["keywords"].add(kw_full)
+            
+        # 2. Logic Tách từ (Tokenize) - Chỉ dùng cho Intent Name
+        if split_words:
+            words = kw_full.split() # Tách theo khoảng trắng
+            for w in words:
+                w_clean = w.strip()
+                # Chỉ lấy từ đơn có độ dài > 2 (để bỏ qua các từ rác như "về", "của", "là"...)
+                # VD: "Chuyên ngành" -> Thêm được "chuyên", "ngành"
+                if len(w_clean) > 2:
+                    intent_keywords_map[intent_id]["keywords"].add(w_clean)
+
+    # Init map
+    for i in intents:
+        intent_keywords_map[i.intent_id] = {
+            "obj": i,
+            "keywords": set(), # Dùng set
+            "count": 0
+        }
+        
+        # --- SỬA ĐỔI QUAN TRỌNG TẠI ĐÂY ---
+        # Bật split_words=True cho Intent Name
+        # Giúp bắt được trường hợp user hỏi thiếu chữ (VD: hỏi "ngành" thay vì "chuyên ngành")
+        add_safe_keyword(i.intent_id, i.intent_name, split_words=True)
+        
+        # Description vẫn giữ nguyên (False) để tránh nhiễu
+        if i.description and len(i.description) < 50:
+            add_safe_keyword(i.intent_id, i.description, split_words=False)
+
+    # Add Training Questions (Không tách từ, giữ nguyên phrase)
+    for t in training_data:
+        if t.intent_id in intent_keywords_map:
+            add_safe_keyword(t.intent_id, t.question, split_words=False)
+
+    # Add Document Titles (Không tách từ)
+    for d in documents:
+        # Check kỹ model của bạn là 'intend_id' hay 'intent_id'
+        if hasattr(d, 'intend_id') and d.intend_id in intent_keywords_map:
+            add_safe_keyword(d.intend_id, d.title, split_words=False)
+        elif hasattr(d, 'intent_id') and d.intent_id in intent_keywords_map:
+            add_safe_keyword(d.intent_id, d.title, split_words=False)
+
+    # --- BƯỚC 3: MATCHING (TỐI ƯU THỨ TỰ) ---
+    for msg in user_messages:
+        text = msg.message_text.lower().strip() if msg.message_text else ""
+        if not text: continue
+
+        found_match_for_msg = False
+        
+        # Chiến thuật: Sort keyword theo độ dài giảm dần
+        for intent_id, data in intent_keywords_map.items():
+            # Convert set sang list và sort độ dài giảm dần (Longest Match First)
+            sorted_keywords = sorted(list(data["keywords"]), key=len, reverse=True)
+            
+            for kw in sorted_keywords:
+                if kw in text:
+                    intent_keywords_map[intent_id]["count"] += 1
+                    found_match_for_msg = True
+                    break # Đã match keyword xịn nhất của intent này
+            
+            if found_match_for_msg:
+                break # Đã tìm thấy intent cho tin nhắn này, next qua tin tiếp theo
+
+    # --- BƯỚC 4: FORMAT KẾT QUẢ ---
+    result_list = []
+    for intent_id, data in intent_keywords_map.items():
+        intent_obj = data["obj"]
+        result_list.append({
+            "intent_id": intent_id,
+            "intent_name": intent_obj.intent_name,
+            "description": intent_obj.description,
+            "question_count": data["count"]
+        })
+
+    # Sort giảm dần
+    result_list.sort(key=lambda x: x["question_count"], reverse=True)
+    
+    return {
+        "status": "success",
+        "data": result_list,
+        "message": "Intent asked statistics retrieved successfully"
+    }
