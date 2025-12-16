@@ -307,6 +307,7 @@ class Intent(Base):
     description = Column(String)
     created_at = Column(Date, default=datetime.now)
     created_by = Column(Integer, ForeignKey("Users.user_id"), nullable=True)
+    is_deleted = Column(Boolean, default=False)
     
     faq_statistics = relationship('FaqStatistics', back_populates='intent', cascade="all, delete-orphan")
     training_questions = relationship('TrainingQuestionAnswer', back_populates='intent', cascade="all, delete-orphan")
@@ -383,6 +384,7 @@ class KnowledgeBaseDocument(Base):
     created_by = Column(Integer, ForeignKey('Users.user_id'))
     reviewed_by = Column(Integer, ForeignKey('Users.user_id'), nullable=True)
     reviewed_at = Column(Date, nullable=True)
+    reject_reason = Column(String, nullable=True)
     
     intent = relationship('Intent', back_populates='document')
     # Relationships

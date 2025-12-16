@@ -287,6 +287,7 @@ class CurriculumResponse(CurriculumBase):
 class IntentBase(BaseModel):
     intent_name: str
     description: Optional[str]
+    is_deleted: Optional[bool] = False
 
 
 class IntentResponse(IntentBase):
@@ -337,6 +338,7 @@ class KnowledgeBaseDocumentBase(BaseModel):
     created_at: Optional[date]
     updated_at: Optional[date]
     created_by: Optional[int]
+    reject_reason: Optional[str] = None
 
 
 class KnowledgeBaseDocumentResponse(KnowledgeBaseDocumentBase):
@@ -344,6 +346,7 @@ class KnowledgeBaseDocumentResponse(KnowledgeBaseDocumentBase):
     status: Optional[str] = "draft"  # draft, approved, rejected, deleted
     reviewed_by: Optional[int] = None
     reviewed_at: Optional[date] = None
+    reject_reason: Optional[str] = None
 
     class Config:
         orm_mode = True
