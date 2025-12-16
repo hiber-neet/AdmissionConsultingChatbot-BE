@@ -53,6 +53,13 @@ def create_intent(intent: schemas.IntentBase, db: Session = Depends(get_db), cur
     db.refresh(db_intent)
     return db_intent
 
+@router.get("/active", response_model=List[schemas.IntentResponse], tags=["Intent"])
+def read_active_intents(db: Session = Depends(get_db), current_user: entities.Users = Depends(check_view_permission)):
+    """
+    Get a list of active intents. Users with view permission can access.
+    """
+    intents = db.query(entities.Intent).filter(entities.Intent.is_deleted == False).all()
+    return intents
 
 @router.get("/{intent_id}", response_model=schemas.IntentResponse, tags=["Intent"])
 def read_intent(intent_id: int, db: Session = Depends(get_db), current_user: entities.Users = Depends(check_view_permission)):
@@ -77,7 +84,7 @@ def read_intents(db: Session = Depends(get_db), current_user: entities.Users = D
 @router.put("/{intent_id}", response_model=schemas.IntentResponse, tags=["Intent"])
 def update_intent(intent_id: int, intent: schemas.IntentBase, db: Session = Depends(get_db), current_user: entities.Users = Depends(check_create_edit_permission)):
     """
-    Update intent by ID. Admin or Consultant permission required.
+    Update and restore intent by ID. Admin or Consultant permission required.
     """
     db_intent = db.query(entities.Intent).filter(entities.Intent.intent_id == intent_id).first()
     if db_intent is None:
@@ -85,7 +92,23 @@ def update_intent(intent_id: int, intent: schemas.IntentBase, db: Session = Depe
     
     db_intent.intent_name = intent.intent_name
     db_intent.description = intent.description
+    db_intent.is_deleted = False
     
     db.commit()
     db.refresh(db_intent)
     return db_intent
+
+
+@router.delete("/{intent_id}", tags=["Intent"])
+def delete_intent(intent_id: int, db: Session = Depends(get_db), current_user: entities.Users = Depends(check_create_edit_permission)):
+    """
+    Soft delete intent by ID. Admin or Consultant permission required.
+    """
+    db_intent = db.query(entities.Intent).filter(entities.Intent.intent_id == intent_id, entities.Intent.is_deleted == False).first()
+    if db_intent is None:
+        raise HTTPException(status_code=404, detail="Intent not found")
+    
+    db_intent.is_deleted = True
+    
+    db.commit()
+    return {"message": "Intent deleted successfully"}

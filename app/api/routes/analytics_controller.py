@@ -818,7 +818,7 @@ async def get_content_statistics(
         
         # Review articles count (assuming 'review' or 'pending' status)
         review_articles = db.query(func.count(entities.Article.article_id)).filter(
-            or_(entities.Article.status == 'review', entities.Article.status == 'pending')
+            or_(entities.Article.status == 'draft', entities.Article.status == 'pending')
         ).scalar() or 0
         
         # Recent articles (last 10, exclude deleted)
