@@ -10,6 +10,13 @@ from app.core.security import get_current_user, has_permission
 
 router = APIRouter()
 
+def get_article_author(db: Session, user_id: int) -> str:
+    """Helper function to get author's name by user_id"""
+    user = db.query(entities.Users).filter(entities.Users.user_id == user_id).first()
+    if user:
+        return user.full_name or user.username or "Unknown"
+    return "Unknown"
+
 def check_analytics_permission(current_user: entities.Users = Depends(get_current_user)):
     """Check if user has permission to view analytics (Admin, Consultant, or Content Manager)"""
     if not current_user:
@@ -805,7 +812,12 @@ async def get_content_statistics(
         total_articles = db.query(func.count(entities.Article.article_id)).filter(
             entities.Article.status != 'deleted'
         ).scalar() or 0
-        
+
+        my_articles = db.query(func.count(entities.Article.article_id)).filter(
+            entities.Article.created_by == current_user.user_id,
+            entities.Article.status != 'deleted'
+        ).scalar() or 0
+
         # Published articles count
         published_articles = db.query(func.count(entities.Article.article_id)).filter(
             entities.Article.status == 'published'
@@ -892,13 +904,13 @@ async def get_content_statistics(
                     "published_articles": published_articles,
                     "draft_articles": draft_articles,
                     "review_articles": review_articles,
-                    "my_articles": total_articles  # For now, assume all articles are "my articles"
+                    "my_articles": my_articles  # For now, assume all articles are "my articles"
                 },
                 "recent_articles": [
                     {
                         "article_id": article.article_id,
                         "title": article.title,
-                        "author": "Admin",  # You might want to get actual author info
+                        "author": get_article_author(db, article.created_by),  # You might want to get actual author info
                         "status": article.status,
                         "created_at": article.create_at.isoformat() if article.create_at else None,
                         "major_id": article.major_id,
@@ -910,7 +922,7 @@ async def get_content_statistics(
                     {
                         "article_id": article.article_id,
                         "title": article.title,
-                        "author": "Admin",
+                        "author": get_article_author(db, article.created_by),  # You might want to get actual author info
                         "created_at": article.create_at.isoformat() if article.create_at else None,
                         "view_count": 0,  # You might want to add view tracking
                         "url": f"/articles/{article.article_id}"
