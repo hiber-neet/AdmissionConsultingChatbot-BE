@@ -242,7 +242,8 @@ def get_all_training_questions(
             "created_at": tqa.created_at,
             "approved_at": tqa.approved_at,
             "created_by": tqa.created_by,
-            "approved_by": tqa.approved_by
+            "approved_by": tqa.approved_by,
+            "reject_reason": getattr(tqa, 'reject_reason', None)
         })
     
     return result
@@ -282,7 +283,8 @@ def get_all_documents(
             "created_by": doc.created_by,
             "status": doc.status,
             "reviewed_by": doc.reviewed_by,
-            "reviewed_at": doc.reviewed_at
+            "reviewed_at": doc.reviewed_at,
+            "reject_reason": getattr(doc, 'reject_reason', None)
         })
     
     return result
@@ -362,7 +364,8 @@ def get_document_by_id(
         "created_by": document.created_by,
         "status": document.status,
         "reviewed_by": document.reviewed_by,
-        "reviewed_at": document.reviewed_at
+        "reviewed_at": document.reviewed_at,
+        "reject_reason": getattr(document, 'reject_reason', None)
     }
 
 
@@ -490,9 +493,8 @@ def reject_document(
     document.status = 'rejected'
     document.reviewed_by = current_user.user_id
     document.reviewed_at = datetime.now().date()
+    document.reject_reason = reason  # Save the rejection reason
     db.commit()
-    
-    # TODO: Consider adding a rejection_reason field to the entity or notification system
     
     return {
         "message": "Document rejected",
@@ -635,12 +637,10 @@ def reject_training_qa(
     qa = get_training_qa_or_404(question_id, db)
     
     qa.status = 'rejected'
-    qa.approved_by = current_user.user_id
-    qa.approved_at = datetime.now().date()
+    qa.reject_reason = reason
+    # do not reuse approved_by/approved_at for rejection
     db.commit()
-    
-    # TODO: Consider adding a rejection_reason field or notification system
-    
+
     return {
         "message": "Training Q&A rejected",
         "question_id": question_id,

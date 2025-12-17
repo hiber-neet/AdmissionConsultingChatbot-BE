@@ -57,7 +57,7 @@ class Users(Base):
     # chat, recommendations
     chat_interactions = relationship('ChatInteraction', back_populates='user', cascade="all, delete-orphan")
     participate_sessions = relationship('ParticipateChatSession', back_populates='user')
-    # training QA created/approved (two distinct relations)
+    # training QA created/approved/rejected (three distinct relations)
     training_question_answers_created = relationship(
         "TrainingQuestionAnswer",
         foreign_keys="[TrainingQuestionAnswer.created_by]",
@@ -70,6 +70,7 @@ class Users(Base):
         back_populates="approved_by_user",
         cascade="all, delete-orphan"
     )
+    # Note: rejected_by link removed; rejection is stored as text in TrainingQuestionAnswer.reject_reason
 
 
 class UserPermission(Base):
@@ -339,6 +340,8 @@ class TrainingQuestionAnswer(Base):
     created_by = Column(Integer, ForeignKey("Users.user_id"))
     approved_by = Column(Integer, ForeignKey("Users.user_id"), nullable=True)
     approved_at = Column(Date, nullable=True)
+    reject_reason = Column(String, nullable=True)
+    # removed rejected_by/rejected_at: rejection author/date are not stored as separate columns
     
     # Relationships
     intent = relationship("Intent", back_populates="training_questions")
@@ -349,6 +352,7 @@ class TrainingQuestionAnswer(Base):
     approved_by_user = relationship(
         "Users", foreign_keys=[approved_by], back_populates="training_question_answers_approved"
     )
+    # rejection author relationship removed
 
 
 # -------------------- AdmissionInformation ---------------------------

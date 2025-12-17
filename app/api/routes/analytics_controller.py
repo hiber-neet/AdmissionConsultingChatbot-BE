@@ -1664,33 +1664,53 @@ async def get_system_health(
     """
     Get system health metrics
     """
+    import traceback
+    import sys
+    
     try:
+        print("=== SYSTEM HEALTH DEBUG START ===", file=sys.stderr, flush=True)
+        
         # Total knowledge base articles
+        print("Querying articles...", file=sys.stderr, flush=True)
         total_articles = db.query(entities.Article).filter(
             entities.Article.status == 'published'
         ).count()
+        print(f"Total articles: {total_articles}", file=sys.stderr, flush=True)
         
         # Total knowledge documents (only approved)
+        print("Querying KB documents...", file=sys.stderr, flush=True)
         total_kb_docs = db.query(entities.KnowledgeBaseDocument).filter(
             entities.KnowledgeBaseDocument.status == 'approved'
         ).count()
+        print(f"Total KB docs: {total_kb_docs}", file=sys.stderr, flush=True)
         
         # Training QA pairs (only approved)
+        print("Querying QA pairs...", file=sys.stderr, flush=True)
         total_qa_pairs = db.query(entities.TrainingQuestionAnswer).filter(
             entities.TrainingQuestionAnswer.status == 'approved'
         ).count()
+        print(f"Total QA pairs: {total_qa_pairs}", file=sys.stderr, flush=True)
         
         # Recent activity (errors, warnings, etc.)
+        # Calculate date threshold for the last 24 hours
+        print("Querying failed interactions...", file=sys.stderr, flush=True)
+        date_threshold = datetime.now() - timedelta(hours=24)
+        
         recent_failed_interactions = db.query(entities.ChatInteraction).filter(
             and_(
                 entities.ChatInteraction.rating.isnot(None),
                 entities.ChatInteraction.rating < 3,  # Low ratings
-                entities.ChatInteraction.timestamp >= datetime.now() - timedelta(hours=24)
+                entities.ChatInteraction.timestamp >= date_threshold
             )
         ).count()
+        print(f"Failed interactions: {recent_failed_interactions}", file=sys.stderr, flush=True)
         
         # Total users count (all users in the system)
+        print("Querying users...", file=sys.stderr, flush=True)
         total_users = db.query(entities.Users).count()
+        print(f"Total users: {total_users}", file=sys.stderr, flush=True)
+        
+        print("=== SYSTEM HEALTH DEBUG END ===", file=sys.stderr, flush=True)
         
         return {
             "total_users": total_users,
@@ -1701,6 +1721,10 @@ async def get_system_health(
         }
         
     except Exception as e:
+        print(f"=== SYSTEM HEALTH ERROR ===", file=sys.stderr, flush=True)
+        print(f"Error type: {type(e).__name__}", file=sys.stderr, flush=True)
+        print(f"Error message: {str(e)}", file=sys.stderr, flush=True)
+        print(f"Traceback:\n{traceback.format_exc()}", file=sys.stderr, flush=True)
         raise HTTPException(status_code=500, detail=f"Error getting system health: {str(e)}")
 
 @router.get("/intent-asked-statistics")

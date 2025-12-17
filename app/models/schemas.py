@@ -310,6 +310,7 @@ class TrainingQuestionResponse(TrainingQuestionRequest):
     approved_at: Optional[date] = None
     created_by: Optional[int] = None
     approved_by: Optional[int] = None
+    reject_reason: Optional[str] = None
 
     class Config:
         orm_mode = True
