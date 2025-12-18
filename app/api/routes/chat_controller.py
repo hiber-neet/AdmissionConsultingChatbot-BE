@@ -34,8 +34,6 @@ async def websocket_chat(websocket: WebSocket):
 
     # 2️⃣ Sau khi nhận xong → gửi lời chào
     greeting_chunks = [
-
-        "Chào bạn! 👋 Mình là Chatbot tư vấn tuyển sinh của trường đại học FPT.",
         "Rất vui được đồng hành cùng bạn!\nMình có thể giúp bạn:",
         "\n\n1️⃣ Giới thiệu ngành học, chương trình đào tạo.",
         "\n\n2️⃣ Tư vấn lộ trình học tập và cơ hội nghề nghiệp.",
@@ -170,12 +168,12 @@ async def websocket_chat(websocket: WebSocket):
 
             if tier_source == "nope":
                 print("floor 5: nope layer")
-                
+                content = "Hiện tại mình chưa tìm thấy thông tin phù hợp với câu hỏi này trong hệ thống. Bạn có thể liên hệ trực tiếp chuyên viên tuyển sinh để được hỗ trợ chi tiết hơn nhé!"
+                service.add_interaction_and_faq_for_intent_0(content, session_id=session_id, user_id=user_id, intent_id=0, message=message)
                 # 🧯 6️⃣ fallback cuối cùng
                 await websocket.send_json({
                     "event": "chunk",
-                    "content": "Hiện tại mình chưa tìm thấy thông tin phù hợp với câu hỏi này trong hệ thống. "
-            "Bạn có thể liên hệ trực tiếp chuyên viên tuyển sinh để được hỗ trợ chi tiết hơn nhé!"
+                    "content": content
                 })
                 await websocket.send_json({
                     "event": "done",

@@ -687,6 +687,67 @@ class TrainingService:
         finally:
             db.close()
 
+    def add_interaction_and_faq_for_intent_0(self, full_response: str, session_id: int = 1, user_id: int = 1, intent_id: int = 1, message: str = ""):
+            db = SessionLocal()
+            if not user_id:
+                # 🧩 1. Lưu tin nhắn người dùng
+                user_msg = ChatInteraction(
+                    message_text=message,
+                    timestamp=datetime.now(),
+                    rating=None,
+                    is_from_bot=False,
+                    sender_id=None,
+                    session_id=session_id
+                )
+                db.add(user_msg)
+                db.flush()
+            else:
+                # 🧩 1. Lưu tin nhắn người dùng
+                user_msg = ChatInteraction(
+                    message_text=message,
+                    timestamp=datetime.now(),
+                    rating=None,
+                    is_from_bot=False,
+                    sender_id=user_id,
+                    session_id=session_id
+                )
+                db.add(user_msg)
+                db.flush()
+            bot_msg = ChatInteraction(
+                message_text=full_response,
+                timestamp=datetime.now(),
+                rating=None,
+                is_from_bot=True,
+                sender_id=None,
+                session_id=session_id
+            )
+            db.add(bot_msg)
+            db.flush()
+            db.commit()
+            self.update_faq_statistics_for_query(db, user_msg.interaction_id, intent_id = intent_id)
+
+    def update_faq_statistics_for_query(self, db: Session, query_id: int, intent_id: int = 1):
+        
+        try:
+            response = db.query(ChatInteraction).filter(
+            ChatInteraction.interaction_id == query_id,
+            ChatInteraction.is_from_bot == False
+        ).first()
+
+            if not response:
+                raise ValueError("Chatbot response not found")
+
+            faq = FaqStatistics(
+                query_from_user_id = query_id,
+                intent_id = intent_id
+            )
+            db.add(faq)
+            db.commit()
+
+        except Exception as e:
+            db.rollback()
+            print(f"Error updating FaqStatistics: {e}")
+
     def create_training_qa(self, db: Session, intent_id: int, question: str, answer: str, created_by: int):
         qa = TrainingQuestionAnswer(
             question=question,

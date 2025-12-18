@@ -295,7 +295,17 @@ class ChatInteraction(Base):
     # Relationships
     user = relationship('Users', back_populates='chat_interactions')
     session = relationship('ChatSession', back_populates='interactions')
-    faq_statistics = relationship('FaqStatistics', back_populates='interaction')
+    faq_responses = relationship(
+    'FaqStatistics',
+    foreign_keys='FaqStatistics.response_from_chat_id',
+    back_populates='response_from_chat'
+    )
+
+    faq_queries = relationship(
+        'FaqStatistics',
+        foreign_keys='FaqStatistics.query_from_user_id',
+        back_populates='query_from_user'
+    )
 
 # =====================
 # INTENT, FAQ, RECOMMENDATION, TRAINING QA
@@ -319,10 +329,21 @@ class FaqStatistics(Base):
     
     faq_id = Column(Integer, primary_key=True, autoincrement=True)  
     response_from_chat_id = Column(Integer, ForeignKey(ChatInteraction.interaction_id))
+    query_from_user_id = Column(Integer, ForeignKey(ChatInteraction.interaction_id))
     last_used_at = Column(Date)
     intent_id = Column(Integer, ForeignKey('Intent.intent_id'))
     usage_count = Column(Integer)
-    interaction = relationship('ChatInteraction', back_populates='faq_statistics')
+    response_from_chat = relationship(
+    'ChatInteraction',
+    foreign_keys=[response_from_chat_id],
+    back_populates='faq_responses'
+    )
+
+    query_from_user = relationship(
+        'ChatInteraction',
+        foreign_keys=[query_from_user_id],
+        back_populates='faq_queries'
+    )
     intent = relationship('Intent', back_populates='faq_statistics')
 
 
