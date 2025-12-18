@@ -110,41 +110,38 @@ async def websocket_chat(websocket: WebSocket):
                         "sources": [r.payload.get("document_id") for r in doc_results]
                     }
                     tier_source = "document"
-
+            context_chunks = result["response"]
+            intent_id = result["intent_id"]
+            context = "\n\n".join([
+                r.payload.get("chunk_text", "") for r in context_chunks
+            ])
+            
+            tier_source = await service.llm_document_recommendation_check(enriched_query, context)
+            print("SOURCE NAME: " + tier_source)
             # === TIER 2: document-only (no QA match) ===
-            if tier_source == "document" or confidence < 0.75:
+            if tier_source == "document" and confidence > 0.7:
                 print("🔍 floor 3: using document context")
-                context_chunks = result["response"]
-                intent_id = result["intent_id"]
-                context = "\n\n".join([
-                    r.payload.get("chunk_text", "") for r in context_chunks
-                ])
-                check = await service.llm_document_recommendation_check(enriched_query, context)
-                if check == "document":
-                    async for chunk in service.stream_response_from_context(
-                        enriched_query, context, session_id, user_id, intent_id, message
-                    ):
-                        await websocket.send_text(json.dumps({
-                            "event": "chunk",
-                            "content": getattr(chunk, "content", str(chunk))
-                        }))
+                
+                async for chunk in service.stream_response_from_context(
+                    enriched_query, context, session_id, user_id, intent_id, message
+                ):
+                    await websocket.send_text(json.dumps({
+                        "event": "chunk",
+                        "content": getattr(chunk, "content", str(chunk))
+                    }))
                     # Gửi tín hiệu kết thúc khi hoàn tất
-                    try:
-                        await websocket.send_json({
-                            "event": "done",
-                            "sources": result.get("sources", []),
-                            "confidence": confidence
-                        })
-                        continue
-                    except Exception:
-                        print("Không thể gửi event done vì client đã ngắt.")
-                        break
-                elif check == "recommendation": 
-                    tier_source = "recommendation"
-                elif check == "nope":
-                    tier_source = "nope"
+                try:
+                    await websocket.send_json({
+                        "event": "done",
+                        "sources": result.get("sources", []),
+                        "confidence": confidence
+                    })
+                    continue
+                except Exception:
+                    print("Không thể gửi event done vì client đã ngắt.")
+                    break
                 # === TIER 3: recommedation ===
-            if tier_source == "recommendation":
+            elif tier_source == "recommendation":
                 print("floor 4: using recommendation layer")
                    
                 async for chunk in service.stream_response_from_recommendation(
@@ -166,20 +163,26 @@ async def websocket_chat(websocket: WebSocket):
                     print("Không thể gửi event done vì client đã ngắt.")
                     break
 
-            if tier_source == "nope":
+            elif tier_source == "document" or tier_source == "nope":
                 print("floor 5: nope layer")
-                content = "Hiện tại mình chưa tìm thấy thông tin phù hợp với câu hỏi này trong hệ thống. Bạn có thể liên hệ trực tiếp chuyên viên tuyển sinh để được hỗ trợ chi tiết hơn nhé!"
-                service.add_interaction_and_faq_for_intent_0(content, session_id=session_id, user_id=user_id, intent_id=0, message=message)
-                # 🧯 6️⃣ fallback cuối cùng
-                await websocket.send_json({
-                    "event": "chunk",
-                    "content": content
-                })
-                await websocket.send_json({
-                    "event": "done",
-                    "sources": [],
-                    "confidence": 0.0
-                })
+                async for chunk in service.stream_response_from_NA(
+                    enriched_query, context, session_id, user_id, 0, message
+                ):
+                    await websocket.send_text(json.dumps({
+                        "event": "chunk",
+                        "content": getattr(chunk, "content", str(chunk))
+                    }))
+                    # Gửi tín hiệu kết thúc khi hoàn tất
+                try:
+                    await websocket.send_json({
+                        "event": "done",
+                        "sources": result.get("sources", []),
+                        "confidence": confidence
+                    })
+                    continue
+                except Exception:
+                    print("Không thể gửi event done vì client đã ngắt.")
+                    break
                 
                 
     except WebSocketDisconnect:
