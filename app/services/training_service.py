@@ -398,7 +398,7 @@ class TrainingService:
         db = SessionLocal()
         
         try:
-            if user_id:
+            if not user_id:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
                     message_text=message,
@@ -481,7 +481,7 @@ class TrainingService:
     async def stream_response_from_qa(self, query: str, context: str, session_id: int = 1, user_id: int = 1, intent_id: int = 1, message: str = ""):
         db = SessionLocal()
         try:
-            if user_id:
+            if not user_id:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
                     message_text=message,
@@ -577,7 +577,7 @@ class TrainingService:
     ):
         db = SessionLocal()
         try:
-            if user_id:
+            if not user_id:
                 # 🧩 1. Lưu tin nhắn người dùng
                 user_msg = ChatInteraction(
                     message_text=message,
