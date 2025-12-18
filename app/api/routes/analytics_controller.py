@@ -1839,3 +1839,71 @@ async def get_intent_stats(db: Session = Depends(get_db)):
         "data": result_list,
         "message": "Intent asked statistics retrieved successfully"
     }
+
+FALLBACK_RESPONSES = [
+    "xin lỗi, tôi không tìm thấy thông tin",
+    "tôi chưa có dữ liệu về câu hỏi này",
+    "hiện tại tôi chưa thể trả lời",
+    "thông tin này không nằm trong phạm vi hiểu biết",
+    "sorry, i don't have information",
+    "hiện tại mình chưa tìm thấy thông tin phù hợp với câu hỏi này trong hệ thống. Bạn có thể liên hệ trực tiếp chuyên viên tuyển sinh để được hỗ trợ chi tiết hơn nhé!",
+    "không tìm thấy thông tin",
+    "mình không có thông tin về",
+    "hiện tại mình không có thông tin cụ thể về",
+    "hiện tại mình chưa có thông tin cụ thể về",
+    "hiện tại, mình chưa có thông tin cụ thể về",
+    "hiện tại, mình không có thông tin cụ thể về",
+    # Thêm các câu khác mà bot của bạn dùng...
+]
+
+@router.get("/unanswered-questions")
+async def get_unanswered_questions(
+    db: Session = Depends(get_db), 
+    limit: int = 100
+):
+    # --- SỬA LỖI 1: QUERY ---
+    # Bỏ session_id trong order_by. Chỉ lấy theo ID giảm dần để chắc chắn lấy được tin MỚI NHẤT toàn hệ thống.
+    recent_interactions = db.query(entities.ChatInteraction).order_by(
+        entities.ChatInteraction.interaction_id.desc()
+    ).limit(5000).all()
+
+    # Đảo ngược lại để có thứ tự thời gian: Quá khứ -> Hiện tại (để vòng lặp check i-1 và i hoạt động đúng)
+    interactions = recent_interactions[::-1] 
+
+    failed_questions = []
+
+    for i in range(1, len(interactions)):
+        current_msg = interactions[i]     
+        prev_msg = interactions[i-1]      
+
+        # Check cặp Hỏi - Đáp
+        if (current_msg.session_id == prev_msg.session_id and 
+            prev_msg.is_from_bot == False and 
+            current_msg.is_from_bot == True):
+
+            is_failed = False
+            bot_text = current_msg.message_text.lower() if current_msg.message_text else ""
+            
+            # --- SỬA LỖI 2: SO SÁNH CHUỖI ---
+            # Chuyển fallback mẫu về .lower() trước khi so sánh
+            if any(fallback.lower() in bot_text for fallback in FALLBACK_RESPONSES):
+                is_failed = True
+                reason = "Bot trả lời mặc định (No Context)"
+
+            if is_failed:
+                failed_questions.append({
+                    "session_id": prev_msg.session_id,
+                    "question_id": prev_msg.interaction_id,
+                    "question_text": prev_msg.message_text,
+                    "bot_response": current_msg.message_text,
+                    "timestamp": prev_msg.timestamp,
+                    "fail_reason": reason
+                })
+
+    # Sắp xếp kết quả trả về: Mới nhất lên đầu
+    failed_questions.sort(key=lambda x: x["question_id"], reverse=True)
+
+    return {
+        "total_failed": len(failed_questions),
+        "data": failed_questions[:limit]
+    }
