@@ -264,7 +264,7 @@ class TrainingService:
         - Nếu tầng 1 phù hợp thì không cần check đến tầng 2
         - Nếu không phù hợp với tầng 1 và tầng 2 thì trả về duy nhất 1 từ "Nope"
         - Check tầng 1(document) đầu tiên:
-        - Chỉ trả về "document" nếu NỘI DUNG của document base THỰC SỰ có thông tin trả lời câu hỏi hoặc câu hỏi người dùng chỉ là những lời chào.
+        - Chỉ trả về "document" nếu NỘI DUNG của document base THỰC SỰ có thông tin trả lời câu hỏi và thông tin đó đúng ý định của người dùng muốn biết hoặc câu hỏi người dùng chỉ là những lời chào.
         - Check qua tầng 2 nếu:
             • chỉ trùng từ khóa nhưng không cùng ý nghĩa
             • document không chứa dữ liệu cần thiết để trả lời
@@ -687,6 +687,130 @@ class TrainingService:
         finally:
             db.close()
 
+    async def stream_response_from_NA(self, query: str, context: str, session_id: int = 1, user_id: int = 1, intent_id: int = 0, message: str = ""):
+        db = SessionLocal()
+        try:
+            if not user_id:
+                # 🧩 1. Lưu tin nhắn người dùng
+                user_msg = ChatInteraction(
+                    message_text=message,
+                    timestamp=datetime.now(),
+                    rating=None,
+                    is_from_bot=False,
+                    sender_id=None,
+                    session_id=session_id
+                )
+                db.add(user_msg)
+                db.flush()
+            else:
+                # 🧩 1. Lưu tin nhắn người dùng
+                user_msg = ChatInteraction(
+                    message_text=message,
+                    timestamp=datetime.now(),
+                    rating=None,
+                    is_from_bot=False,
+                    sender_id=user_id,
+                    session_id=session_id
+                )
+                db.add(user_msg)
+                db.flush()
+            memory = memory_service.get_memory(session_id)
+            mem_vars = memory.load_memory_variables({})
+            chat_history = mem_vars.get("chat_history", "")
+
+            prompt = f"""
+            Bạn là chatbot tư vấn tuyển sinh của trường đại học FPT.
+            Đây là đoạn hội thoại trước: 
+            {chat_history}
+            === CÂU TRẢ LỜI CHÍNH THỨC ===
+            {context}
+
+            === CÂU HỎI NGƯỜI DÙNG ===
+            {query}
+
+            === HƯỚNG DẪN TRẢ LỜI ===
+            Bạn là tầng phản hồi an toàn của chatbot tư vấn tuyển sinh Đại học FPT.
+
+            Nhiệm vụ của bạn KHÔNG phải trả lời kiến thức,
+            mà là xử lý tình huống khi NGỮ CẢNH ĐƯỢC CUNG CẤP
+            KHÔNG PHÙ HỢP với ý định câu hỏi người dùng.
+
+            === NGUYÊN TẮC BẮT BUỘC ===
+            - TUYỆT ĐỐI không suy diễn thông tin từ ngữ cảnh.
+            - TUYỆT ĐỐI không trả lời theo nội dung ngữ cảnh nếu không khớp rõ ràng.
+            - Không bịa thông tin.
+            - Không cố gắng “trả lời cho có”.
+
+            === VIỆC BẠN PHẢI LÀM ===
+            1. Nhận diện rằng nội dung hiện có KHÔNG trả lời đúng câu hỏi.
+            2. Phản hồi một cách lịch sự, rõ ràng, ngắn gọn.
+            3. Hướng người dùng đi đúng hướng tiếp theo.
+
+            === CÁCH PHẢN ỨNG THEO TÌNH HUỐNG ===
+
+            🔹 Nếu câu hỏi hợp lệ nhưng ngữ cảnh không liên quan:
+            → Nói rõ là hiện chưa có thông tin phù hợp để trả lời chính xác.
+            → Gợi ý người dùng cung cấp thêm chi tiết.
+
+            Ví dụ:
+            “Hiện mình chưa tìm thấy thông tin phù hợp với câu hỏi này.
+            Bạn có thể nói rõ hơn hoặc hỏi chi tiết hơn được không?”
+
+            🔹 Nếu câu hỏi quá mơ hồ:
+            → Yêu cầu làm rõ, không đoán ý.
+
+            Ví dụ:
+            “Câu hỏi của bạn hơi chung chung, bạn đang muốn hỏi về học phí,
+            chương trình đào tạo hay điều kiện tuyển sinh?”
+
+            🔹 Nếu nội dung hiện có nói về chủ đề A nhưng người dùng hỏi chủ đề B:
+            → Nêu rõ sự không khớp.
+
+            Ví dụ:
+            “Thông tin hiện tại đang liên quan đến chương trình đào tạo,
+            trong khi câu hỏi của bạn là về điểm chuẩn, nên mình chưa thể trả lời chính xác.”
+
+            🔹 Nếu câu hỏi nằm ngoài phạm vi Đại học FPT:
+            → Nói rõ không có thông tin phù hợp.
+
+            === PHONG CÁCH TRẢ LỜI ===
+            - Ngắn gọn (1–3 câu)
+            - Thân thiện, trung lập
+            - Không chào hỏi dài dòng
+            - Trả lời theo định dạng Markdown: dùng tiêu đề ##, gạch đầu dòng -, xuống dòng rõ ràng.
+            """
+            full_response = ""
+            async for chunk in self.llm.astream(prompt):
+                text = chunk.content or ""
+                full_response += text
+                yield text
+                await asyncio.sleep(0)  # Nhường event loop
+
+            memory.save_context({"input": query}, {"output": full_response})  
+            print("Saved to memory. Current messages:", len(memory.chat_memory.messages))
+
+            # === Lưu bot response vào DB ===
+            bot_msg = ChatInteraction(
+                message_text=full_response,
+                timestamp=datetime.now(),
+                rating=None,
+                is_from_bot=True,
+                sender_id=None,
+                session_id=session_id
+            )
+            db.add(bot_msg)
+            db.flush()
+            # 🧩 5. Commit 1 lần duy nhất
+            db.commit()
+            self.update_faq_statistics(db, bot_msg.interaction_id, intent_id=intent_id)
+            self.update_faq_statistics_for_query(db, user_msg.interaction_id, intent_id = intent_id)
+            print(f"💾 Saved both user+bot messages for session {session_id}")
+        except SQLAlchemyError as e:
+            db.rollback()
+            print(f" Database error during chat transaction: {e}")
+        finally:
+            db.close() 
+
     def add_interaction_and_faq_for_intent_0(self, full_response: str, session_id: int = 1, user_id: int = 1, intent_id: int = 1, message: str = ""):
             db = SessionLocal()
             if not user_id:
@@ -725,6 +849,8 @@ class TrainingService:
             db.flush()
             db.commit()
             self.update_faq_statistics_for_query(db, user_msg.interaction_id, intent_id = intent_id)
+
+
 
     def update_faq_statistics_for_query(self, db: Session, query_id: int, intent_id: int = 1):
         
