@@ -1861,48 +1861,66 @@ async def get_unanswered_questions(
     db: Session = Depends(get_db), 
     limit: int = 100
 ):
-    # --- SỬA LỖI 1: QUERY ---
-    # Bỏ session_id trong order_by. Chỉ lấy theo ID giảm dần để chắc chắn lấy được tin MỚI NHẤT toàn hệ thống.
+    # ... (Giữ nguyên phần Query và Loop) ...
     recent_interactions = db.query(entities.ChatInteraction).order_by(
         entities.ChatInteraction.interaction_id.desc()
     ).limit(5000).all()
-
-    # Đảo ngược lại để có thứ tự thời gian: Quá khứ -> Hiện tại (để vòng lặp check i-1 và i hoạt động đúng)
     interactions = recent_interactions[::-1] 
-
     failed_questions = []
 
     for i in range(1, len(interactions)):
         current_msg = interactions[i]     
         prev_msg = interactions[i-1]      
 
-        # Check cặp Hỏi - Đáp
         if (current_msg.session_id == prev_msg.session_id and 
             prev_msg.is_from_bot == False and 
             current_msg.is_from_bot == True):
 
             is_failed = False
+            reason = ""
             bot_text = current_msg.message_text.lower() if current_msg.message_text else ""
             
-            # --- SỬA LỖI 2: SO SÁNH CHUỖI ---
-            # Chuyển fallback mẫu về .lower() trước khi so sánh
-            if any(fallback.lower() in bot_text for fallback in FALLBACK_RESPONSES):
-                is_failed = True
-                reason = "Bot trả lời mặc định (No Context)"
+            # --- LOGIC MỚI ---
+            matched_fallback = None
+
+            # 1. Tìm Fallback
+            for fallback in FALLBACK_RESPONSES:
+                if fallback.lower() in bot_text:
+                    matched_fallback = fallback.lower()
+                    break 
+
+            # 2. Nếu có Fallback -> Phân tích xem có phải "Quay xe" thành công không
+            if matched_fallback:
+                # Cắt bỏ đoạn fallback để lấy phần còn lại
+                remaining_text = bot_text.replace(matched_fallback, "").strip()
+
+                # A. Check từ khóa "Quay xe" (STRICT MODE)
+                # Chỉ chấp nhận nếu có từ nối mạnh.
+                # Nếu bot chỉ nói "Liên hệ abc..." mà không có "Tuy nhiên", coi như Lỗi.
+                strict_safe_keywords = ["tuy nhiên", "nhưng", "mặc dù", "ngược lại", "bù lại", "%", "triệu đồng", "ngoài Đại học FPT", "ngoài đại học FPT", "ngoài Đại học fpt", "ngoài đại học fpt"]
+                has_safe_word = any(kw in remaining_text for kw in strict_safe_keywords)
+                
+                # B. [QUAN TRỌNG] Vô hiệu hóa check độ dài đơn thuần
+                # Trước đây: has_enough_content = len(remaining_text) > 150 -> Gây ra lỗi False Positive
+                # Bây giờ: Ta bỏ check này. Dù bot nói dài 1000 chữ mà toàn là "vui lòng liên hệ" thì vẫn là Lỗi.
+                
+                # C. CHỐT: Phải có từ khóa "tuy nhiên/nhưng" mới được tha
+                if not has_safe_word:
+                    is_failed = True
+                    reason = "Bot trả lời fallback (Thiếu từ khóa chuyển hướng 'tuy nhiên/nhưng')"
 
             if is_failed:
-                failed_questions.append({
+                 failed_questions.append({
                     "session_id": prev_msg.session_id,
                     "question_id": prev_msg.interaction_id,
                     "question_text": prev_msg.message_text,
                     "bot_response": current_msg.message_text,
                     "timestamp": prev_msg.timestamp,
                     "fail_reason": reason
-                })
+                 })
 
-    # Sắp xếp kết quả trả về: Mới nhất lên đầu
+    # ... (Return kết quả) ...
     failed_questions.sort(key=lambda x: x["question_id"], reverse=True)
-
     return {
         "total_failed": len(failed_questions),
         "data": failed_questions[:limit]
