@@ -1055,9 +1055,11 @@ async def get_consultant_statistics(
         ).all()
         training_set = {q.question.lower().strip() for q in training_questions if q.question}
         
-        # Count knowledge gaps (user questions not in training data)
-        get_unanswered = await get_unanswered_questions( db = db, limit= 100 )
-        unanswered_queries = get_unanswered["total_failed"]
+        # Count knowledge gaps (unanswered questions - questions with intent_id = 0 in FaqStatistics)
+        unanswered_queries = db.query(func.count(entities.FaqStatistics.faq_id)).filter(
+            entities.FaqStatistics.intent_id == 0
+        ).scalar() or 0
+        
         # Questions over time (last 7 days) - chatbot sessions only
         seven_days_ago = datetime.now() - timedelta(days=7)
         questions_over_time = []
