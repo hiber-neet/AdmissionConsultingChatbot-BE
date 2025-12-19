@@ -1056,24 +1056,8 @@ async def get_consultant_statistics(
         training_set = {q.question.lower().strip() for q in training_questions if q.question}
         
         # Count knowledge gaps (user questions not in training data)
-        unanswered_queries = 0
-        for user_q, frequency in user_questions:
-            if user_q:
-                user_q_clean = user_q.lower().strip()
-                # Check if question is in training data
-                if user_q_clean not in training_set:
-                    # Check for partial matches
-                    best_match_score = 0
-                    for train_q in training_set:
-                        common_words = set(user_q_clean.split()) & set(train_q.split())
-                        if common_words:
-                            score = len(common_words) / max(len(user_q_clean.split()), len(train_q.split()))
-                            best_match_score = max(best_match_score, score)
-                    
-                    # If no good match found (< 60% similarity), count as knowledge gap
-                    if best_match_score < 0.6:
-                        unanswered_queries += 1
-        
+        get_unanswered = await get_unanswered_questions( db = db, limit= 100 )
+        unanswered_queries = get_unanswered["total_failed"]
         # Questions over time (last 7 days) - chatbot sessions only
         seven_days_ago = datetime.now() - timedelta(days=7)
         questions_over_time = []
