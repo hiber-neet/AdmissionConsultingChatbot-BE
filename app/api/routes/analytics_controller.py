@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy import func, desc, and_, or_
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -1856,72 +1856,124 @@ FALLBACK_RESPONSES = [
     # Thêm các câu khác mà bot của bạn dùng...
 ]
 
+# @router.get("/unanswered-questions")
+# async def get_unanswered_questions(
+#     db: Session = Depends(get_db), 
+#     limit: int = 100
+# ):
+#     # ... (Giữ nguyên phần Query và Loop) ...
+#     recent_interactions = db.query(entities.ChatInteraction).order_by(
+#         entities.ChatInteraction.interaction_id.desc()
+#     ).limit(5000).all()
+#     interactions = recent_interactions[::-1] 
+#     failed_questions = []
+
+#     for i in range(1, len(interactions)):
+#         current_msg = interactions[i]     
+#         prev_msg = interactions[i-1]      
+
+#         if (current_msg.session_id == prev_msg.session_id and 
+#             prev_msg.is_from_bot == False and 
+#             current_msg.is_from_bot == True):
+
+#             is_failed = False
+#             reason = ""
+#             bot_text = current_msg.message_text.lower() if current_msg.message_text else ""
+            
+#             # --- LOGIC MỚI ---
+#             matched_fallback = None
+
+#             # 1. Tìm Fallback
+#             for fallback in FALLBACK_RESPONSES:
+#                 if fallback.lower() in bot_text:
+#                     matched_fallback = fallback.lower()
+#                     break 
+
+#             # 2. Nếu có Fallback -> Phân tích xem có phải "Quay xe" thành công không
+#             if matched_fallback:
+#                 # Cắt bỏ đoạn fallback để lấy phần còn lại
+#                 remaining_text = bot_text.replace(matched_fallback, "").strip()
+
+#                 # A. Check từ khóa "Quay xe" (STRICT MODE)
+#                 # Chỉ chấp nhận nếu có từ nối mạnh.
+#                 # Nếu bot chỉ nói "Liên hệ abc..." mà không có "Tuy nhiên", coi như Lỗi.
+#                 strict_safe_keywords = ["tuy nhiên", "nhưng", "mặc dù", "ngược lại", "bù lại", "%", "triệu đồng", "ngoài Đại học FPT", "ngoài đại học FPT", "ngoài Đại học fpt", "ngoài đại học fpt"]
+#                 has_safe_word = any(kw in remaining_text for kw in strict_safe_keywords)
+                
+#                 # B. [QUAN TRỌNG] Vô hiệu hóa check độ dài đơn thuần
+#                 # Trước đây: has_enough_content = len(remaining_text) > 150 -> Gây ra lỗi False Positive
+#                 # Bây giờ: Ta bỏ check này. Dù bot nói dài 1000 chữ mà toàn là "vui lòng liên hệ" thì vẫn là Lỗi.
+                
+#                 # C. CHỐT: Phải có từ khóa "tuy nhiên/nhưng" mới được tha
+#                 if not has_safe_word:
+#                     is_failed = True
+#                     reason = "Bot trả lời fallback (Thiếu từ khóa chuyển hướng 'tuy nhiên/nhưng')"
+
+#             if is_failed:
+#                  failed_questions.append({
+#                     "session_id": prev_msg.session_id,
+#                     "question_id": prev_msg.interaction_id,
+#                     "question_text": prev_msg.message_text,
+#                     "bot_response": current_msg.message_text,
+#                     "timestamp": prev_msg.timestamp,
+#                     "fail_reason": reason
+#                  })
+
+#     # ... (Return kết quả) ...
+#     failed_questions.sort(key=lambda x: x["question_id"], reverse=True)
+#     return {
+#         "total_failed": len(failed_questions),
+#         "data": failed_questions[:limit]
+#     }
+
 @router.get("/unanswered-questions")
 async def get_unanswered_questions(
     db: Session = Depends(get_db), 
     limit: int = 100
 ):
-    # ... (Giữ nguyên phần Query và Loop) ...
-    recent_interactions = db.query(entities.ChatInteraction).order_by(
-        entities.ChatInteraction.interaction_id.desc()
-    ).limit(5000).all()
-    interactions = recent_interactions[::-1] 
+    # 1. Định nghĩa Alias
+    UserMsg = aliased(entities.ChatInteraction)
+    BotMsg = aliased(entities.ChatInteraction)
+
+    # 2. Thực hiện Query với select_from để xác định bảng gốc
+    query = (
+        db.query(
+            entities.FaqStatistics.faq_id,
+            UserMsg.interaction_id.label("question_id"),
+            UserMsg.message_text.label("question_text"),
+            UserMsg.session_id.label("session_id"),
+            UserMsg.timestamp.label("timestamp"),
+            BotMsg.message_text.label("bot_response")
+        )
+        .select_from(entities.FaqStatistics) # Ép FaqStatistics nằm ở mệnh đề FROM đầu tiên
+        .join(
+            UserMsg, 
+            entities.FaqStatistics.query_from_user_id == UserMsg.interaction_id
+        )
+        .outerjoin(
+            BotMsg, 
+            entities.FaqStatistics.response_from_chat_id == BotMsg.interaction_id
+        )
+        .filter(entities.FaqStatistics.intent_id == 0) # Lọc intent = 0
+        .order_by(entities.FaqStatistics.faq_id.desc())
+        .limit(limit)
+    )
+
+    results = query.all()
+
+    # 3. Format dữ liệu trả về
     failed_questions = []
+    for row in results:
+        failed_questions.append({
+            "session_id": row.session_id,
+            "question_id": row.question_id,
+            "question_text": row.question_text,
+            "bot_response": row.bot_response if row.bot_response else "Bot không có phản hồi",
+            "timestamp": row.timestamp,
+            "fail_reason": "Hệ thống không nhận diện được ý định (Intent ID = 0)"
+        })
 
-    for i in range(1, len(interactions)):
-        current_msg = interactions[i]     
-        prev_msg = interactions[i-1]      
-
-        if (current_msg.session_id == prev_msg.session_id and 
-            prev_msg.is_from_bot == False and 
-            current_msg.is_from_bot == True):
-
-            is_failed = False
-            reason = ""
-            bot_text = current_msg.message_text.lower() if current_msg.message_text else ""
-            
-            # --- LOGIC MỚI ---
-            matched_fallback = None
-
-            # 1. Tìm Fallback
-            for fallback in FALLBACK_RESPONSES:
-                if fallback.lower() in bot_text:
-                    matched_fallback = fallback.lower()
-                    break 
-
-            # 2. Nếu có Fallback -> Phân tích xem có phải "Quay xe" thành công không
-            if matched_fallback:
-                # Cắt bỏ đoạn fallback để lấy phần còn lại
-                remaining_text = bot_text.replace(matched_fallback, "").strip()
-
-                # A. Check từ khóa "Quay xe" (STRICT MODE)
-                # Chỉ chấp nhận nếu có từ nối mạnh.
-                # Nếu bot chỉ nói "Liên hệ abc..." mà không có "Tuy nhiên", coi như Lỗi.
-                strict_safe_keywords = ["tuy nhiên", "nhưng", "mặc dù", "ngược lại", "bù lại", "%", "triệu đồng", "ngoài Đại học FPT", "ngoài đại học FPT", "ngoài Đại học fpt", "ngoài đại học fpt"]
-                has_safe_word = any(kw in remaining_text for kw in strict_safe_keywords)
-                
-                # B. [QUAN TRỌNG] Vô hiệu hóa check độ dài đơn thuần
-                # Trước đây: has_enough_content = len(remaining_text) > 150 -> Gây ra lỗi False Positive
-                # Bây giờ: Ta bỏ check này. Dù bot nói dài 1000 chữ mà toàn là "vui lòng liên hệ" thì vẫn là Lỗi.
-                
-                # C. CHỐT: Phải có từ khóa "tuy nhiên/nhưng" mới được tha
-                if not has_safe_word:
-                    is_failed = True
-                    reason = "Bot trả lời fallback (Thiếu từ khóa chuyển hướng 'tuy nhiên/nhưng')"
-
-            if is_failed:
-                 failed_questions.append({
-                    "session_id": prev_msg.session_id,
-                    "question_id": prev_msg.interaction_id,
-                    "question_text": prev_msg.message_text,
-                    "bot_response": current_msg.message_text,
-                    "timestamp": prev_msg.timestamp,
-                    "fail_reason": reason
-                 })
-
-    # ... (Return kết quả) ...
-    failed_questions.sort(key=lambda x: x["question_id"], reverse=True)
     return {
         "total_failed": len(failed_questions),
-        "data": failed_questions[:limit]
+        "data": failed_questions
     }
