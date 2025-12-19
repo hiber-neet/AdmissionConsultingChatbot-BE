@@ -1970,7 +1970,7 @@ async def get_unanswered_questions(
             "question_text": row.question_text,
             "bot_response": row.bot_response if row.bot_response else "Bot không có phản hồi",
             "timestamp": row.timestamp,
-            "fail_reason": "Hệ thống không nhận diện được ý định (Intent ID = 0)"
+            "fail_reason": "Hệ thống không nhận diện được ý định"
         })
 
     return {
