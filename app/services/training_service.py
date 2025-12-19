@@ -743,7 +743,7 @@ class TrainingService:
 
             === VIỆC BẠN PHẢI LÀM ===
             1. Nhận diện rằng nội dung hiện có KHÔNG trả lời đúng câu hỏi.
-            2. Phản hồi một cách lịch sự, rõ ràng, ngắn gọn.
+            2. Phản hồi một cách lịch sự, rõ ràng, không máy móc, tự nhiên như 1 tư vấn tuyển sinh
             3. Hướng người dùng đi đúng hướng tiếp theo.
 
             === CÁCH PHẢN ỨNG THEO TÌNH HUỐNG ===
@@ -774,8 +774,7 @@ class TrainingService:
             → Nói rõ không có thông tin phù hợp.
 
             === PHONG CÁCH TRẢ LỜI ===
-            - Ngắn gọn (1–3 câu)
-            - Thân thiện, trung lập
+            - Thân thiện, tự nhiên, không máy móc
             - Không chào hỏi dài dòng
             - Trả lời theo định dạng Markdown: dùng tiêu đề ##, gạch đầu dòng -, xuống dòng rõ ràng.
             """
