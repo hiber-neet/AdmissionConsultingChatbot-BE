@@ -268,7 +268,7 @@ class LiveChatService:
             queue_item.status = "accepted"
             db.commit()
 
-            # CRITICAL: Send SSE event to CUSTOMER with session_id
+            # Send SSE event to CUSTOMER with session_id
             print(f"[Accept] Sending 'accepted' SSE to customer {customer_id} with session_id={session_id}")
             await self.send_customer_event(customer_id, {
                 "event": "accepted",
@@ -536,8 +536,16 @@ class LiveChatService:
         ).options(
             joinedload(LiveChatQueue.customer)
         ).all()
-        
+        official = (
+            db.query(AdmissionOfficialProfile)
+            .filter_by(admission_official_id=official_id)
+            .with_for_update()
+            .first()
+            )
+            
         result = []
+        if not official:
+            return result
         for item in items:
             queue_item_dict = {
                 'id': item.id,

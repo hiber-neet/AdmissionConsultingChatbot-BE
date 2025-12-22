@@ -305,6 +305,7 @@ class TrainingQuestionRequest(BaseModel):
 
 class TrainingQuestionResponse(TrainingQuestionRequest):
     question_id: int
+    intent_name: Optional[str]
     status: Optional[str] = "draft"  # draft, approved, rejected, deleted
     created_at: Optional[date] = None
     approved_at: Optional[date] = None
