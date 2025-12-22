@@ -302,10 +302,33 @@ def download_document(
     document = get_document_or_404(document_id, db)
     resolved_path = check_file_exists(document.file_path)
     
+    # Extract file extension from the stored file_path
+    import os
+    file_extension = os.path.splitext(document.file_path)[1]  # e.g., '.docx', '.pdf', '.txt'
+    
+    # Create proper download filename with extension
+    download_filename = document.title
+    if file_extension and not download_filename.endswith(file_extension):
+        download_filename = f"{download_filename}{file_extension}"
+    
+    # Determine proper media type based on extension
+    media_type_mapping = {
+        '.pdf': 'application/pdf',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.doc': 'application/msword',
+        '.txt': 'text/plain',
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.xls': 'application/vnd.ms-excel',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.ppt': 'application/vnd.ms-powerpoint',
+    }
+    
+    media_type = media_type_mapping.get(file_extension.lower(), 'application/octet-stream')
+    
     return FileResponse(
         path=str(resolved_path),
-        filename=document.title,
-        media_type='application/octet-stream'
+        filename=download_filename,
+        media_type=media_type
     )
 
 @router.get("/documents/{document_id}/view")
