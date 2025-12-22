@@ -215,11 +215,9 @@ async def get_recent_questions(
         # Join with ChatSession to filter by session_type = 'chatbot'
         recent_interactions = (
             db.query(entities.ChatInteraction)
-            .join(entities.ChatSession, entities.ChatInteraction.session_id == entities.ChatSession.chat_session_id)
-            .filter(entities.ChatSession.session_type == 'chatbot')
             .filter(entities.ChatInteraction.is_from_bot == False)
             .filter(entities.ChatInteraction.message_text.isnot(None))
-            .order_by(desc(entities.ChatInteraction.timestamp))
+            .order_by(desc(entities.ChatInteraction.interaction_id))
             .limit(limit)
             .all()
         )

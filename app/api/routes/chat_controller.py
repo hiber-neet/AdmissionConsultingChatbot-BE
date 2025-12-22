@@ -238,5 +238,5 @@ def api_delete_chat_session(session_id: int, user_id: int | None = None):
         return {"message": "Session deleted successfully"}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as e:  
         raise HTTPException(status_code=500, detail=str(e))

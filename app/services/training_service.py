@@ -272,7 +272,7 @@ class TrainingService:
             • query chung chung như: "tôi hợp ngành nào", "hãy tư vấn", "mô tả về tôi", "nên học gì"
             • context không cung cấp thông tin trực tiếp liên quan
         - Check tầng 2(recommendation):
-        - Chỉ trả về "recommendation" nếu câu hỏi người dùng liên quan đến các nội dung tư vấn ngành học hay tư vấn cho cá nhân dựa theo hồ sơ của học sinh hoặc những câu liên quan đến RIASEC, học bạ, GPA, sở thích, nguyện vọng cá nhân; hoặc yêu cầu so sánh ngành theo profile; hoặc yêu cầu gợi ý ngành phù hợp
+        - Chỉ trả về "recommendation" nếu câu hỏi người dùng liên quan đến các nội dung tư vấn ngành học hay tư vấn cho cá nhân dựa theo hồ sơ của học sinh hoặc những câu liên quan đến RIASEC, học bạ, GPA, sở thích, năng lực, trình độ, học lực, nguyện vọng cá nhân; hoặc yêu cầu so sánh ngành theo profile; hoặc yêu cầu gợi ý ngành phù hợp. Và các câu hỏi đề cập đến năng lực tự đánh giá của người học (ví dụ: học lực yếu, trung bình, kém môn nào, không có năng khiếu, sợ không theo kịp, lo lắng về khả năng học) thì vẫn được coi là tư vấn cá nhân, kể cả khi không có GPA hoặc hồ sơ chi tiết. Nếu câu hỏi thể hiện nhu cầu được tư vấn định hướng cho cá nhân nhưng thiếu thông tin chi tiết, vẫn trả về "recommendation" để chatbot hỏi thêm thông tin.
         - Chỉ trả về "Nope" khi cả tầng 1 và tầng 2 đều không liên quan đến câu hỏi người dùng.
         
         Câu hỏi người dùng: "{enriched_query}"
@@ -649,7 +649,7 @@ class TrainingService:
         ===========================
         ### HƯỚNG DẪN XỬ LÝ
 
-        1. **Đầu tiên, hãy kiểm tra xem câu hỏi có thật sự liên quan đến việc tư vấn chọn ngành hay không, hoặc câu hỏi có liên quan đến thông tin hồ sơ người dùng hay không.**
+        1. **Đầu tiên, hãy kiểm tra xem câu hỏi có thật sự liên quan đến việc tư vấn chọn ngành hay không, hoặc câu hỏi có liên quan đến thông tin hồ sơ người dùng hay không, hoặc câu hỏi có liên quan năng lực của người hỏi hay không hoặc các câu hỏi đề cập đến năng lực tự đánh giá của người học (ví dụ: học lực yếu, trung bình, kém môn nào, không có năng khiếu, sợ không theo kịp, lo lắng về khả năng học) thì vẫn được coi là tư vấn cá nhân, kể cả khi không có GPA hoặc hồ sơ chi tiết.**
         - Nếu KHÔNG liên quan → bạn hãy tự tạo câu phản hồi phù hợp với CÂU HỎI NGƯỜI DÙNG
         2. Nếu câu hỏi có liên quan đến thông tin hồ sơ người dùng ở trên bao gồm RIASEC Result và học bạ mà hồ sơ người dùng trống thì hãy yêu cầu người dùng nhập những thông tin này như RIASEC Result hoặc học bạ, 1 trong 2 là có thể được tư vấn dựa vào thông tin hồ sơ người dùng. Đề xuất theo tính cách có thể dựa vào kết quả RIASEC Result của THÔNG TIN HỒ SƠ NGƯỜI DÙNG
         3. Trả lời theo định dạng Markdown: dùng tiêu đề ##, gạch đầu dòng -, xuống dòng rõ ràng.
@@ -729,10 +729,10 @@ class TrainingService:
             {query}
 
             === HƯỚNG DẪN TRẢ LỜI ===
-            Bạn là tầng phản hồi an toàn của chatbot tư vấn tuyển sinh Đại học FPT.
+            Bạn là tầng phản hồi của chatbot tư vấn tuyển sinh Đại học FPT.
 
             Nhiệm vụ của bạn KHÔNG phải trả lời kiến thức,
-            mà là xử lý tình huống khi NGỮ CẢNH ĐƯỢC CUNG CẤP
+            mà là xử lý tình huống, tự tạo câu phản hồi phù hợp với CÂU HỎI NGƯỜI DÙNG khi NGỮ CẢNH ĐƯỢC CUNG CẤP
             KHÔNG PHÙ HỢP với ý định câu hỏi người dùng.
 
             === NGUYÊN TẮC BẮT BUỘC ===
@@ -740,38 +740,14 @@ class TrainingService:
             - TUYỆT ĐỐI không trả lời theo nội dung ngữ cảnh nếu không khớp rõ ràng.
             - Không bịa thông tin.
             - Không cố gắng “trả lời cho có”.
+            - Nếu câu hỏi vẫn thuộc phạm vi tư vấn tuyển sinh nhưng thiếu thông tin, hãy lịch sự yêu cầu người dùng cung cấp thêm dữ liệu cần thiết(thay vì từ chối trả lời).
 
             === VIỆC BẠN PHẢI LÀM ===
             1. Nhận diện rằng nội dung hiện có KHÔNG trả lời đúng câu hỏi.
             2. Phản hồi một cách lịch sự, rõ ràng, không máy móc, tự nhiên như 1 tư vấn tuyển sinh
             3. Hướng người dùng đi đúng hướng tiếp theo.
+            4. Có thể chào hỏi nếu người dùng gửi lời chào
 
-            === CÁCH PHẢN ỨNG THEO TÌNH HUỐNG ===
-
-            🔹 Nếu câu hỏi hợp lệ nhưng ngữ cảnh không liên quan:
-            → Nói rõ là hiện chưa có thông tin phù hợp để trả lời chính xác.
-            → Gợi ý người dùng cung cấp thêm chi tiết.
-
-            Ví dụ:
-            “Hiện mình chưa tìm thấy thông tin phù hợp với câu hỏi này.
-            Bạn có thể nói rõ hơn hoặc hỏi chi tiết hơn được không?”
-
-            🔹 Nếu câu hỏi quá mơ hồ:
-            → Yêu cầu làm rõ, không đoán ý.
-
-            Ví dụ:
-            “Câu hỏi của bạn hơi chung chung, bạn đang muốn hỏi về học phí,
-            chương trình đào tạo hay điều kiện tuyển sinh?”
-
-            🔹 Nếu nội dung hiện có nói về chủ đề A nhưng người dùng hỏi chủ đề B:
-            → Nêu rõ sự không khớp.
-
-            Ví dụ:
-            “Thông tin hiện tại đang liên quan đến chương trình đào tạo,
-            trong khi câu hỏi của bạn là về điểm chuẩn, nên mình chưa thể trả lời chính xác.”
-
-            🔹 Nếu câu hỏi nằm ngoài phạm vi Đại học FPT:
-            → Nói rõ không có thông tin phù hợp.
 
             === PHONG CÁCH TRẢ LỜI ===
             - Thân thiện, tự nhiên, không máy móc
