@@ -214,14 +214,29 @@ class TrainingService:
         chat_history = mem_vars.get("chat_history", "")
 
         prompt = f"""
-        Bạn là một trợ lý giúp chuyển các câu trả lời của người dùng thành các truy vấn tìm kiếm đầy đủ cho chatbot RAG tư vấn tuyển sinh.
+        Bạn là một trợ lý chuẩn hóa truy vấn cho chatbot RAG tư vấn tuyển sinh Đại học FPT.
 
-        Cuộc hội thoại gần đây (theo thứ tự từ cũ đến mới):
+        Cuộc hội thoại gần đây:
         {chat_history}
 
-        Phản hồi mới nhất của người dùng: "{user_message}"
+        Phản hồi mới nhất của người dùng:
+        "{user_message}"
 
-        Nhiệm vụ: Dựa trên "cuộc hội thoại gần đây" và "phản hồi mới nhất của người dùng", bạn hãy đảm bảo tạo ra **một câu truy vấn tìm kiếm**, rõ ràng, cụ thể (bằng tiếng Việt), thể hiện đúng ý định của người dùng để gửi cho chatbot rag tư vấn để nó có thể hiểu yêu cầu của người dùng. "Chỉ tạo truy vấn nếu phản hồi của người dùng là phần tiếp nối hoặc làm rõ nội dung trong hội thoại trước đó.", nếu phản hồi của người dùng không trả lời hoặc không liên quan cho cuộc hội thoại gần đây thì hãy trả về y nguyên phản hồi mới nhất của người dùng.
+        NHIỆM VỤ:
+        - Chỉ viết lại câu hỏi của người dùng cho rõ ràng hơn nếu:
+        • Câu trả lời hiện tại phụ thuộc trực tiếp vào hội thoại trước đó
+        • Hoặc người dùng dùng đại từ, câu rút gọn, câu thiếu chủ ngữ
+
+        - TUYỆT ĐỐI KHÔNG:
+        • Thêm thông tin mới
+        • Thêm phạm vi mới (ví dụ: “các trường khác”, “tại Việt Nam”, “so sánh”)
+        • Thay đổi mục tiêu câu hỏi
+        • Suy đoán ý định người dùng
+
+        - Nếu câu hỏi đã rõ ràng và độc lập:
+        → Trả về NGUYÊN VĂN phản hồi mới nhất của người dùng.
+
+        - Chỉ xuất ra MỘT câu truy vấn tiếng Việt, không giải thích.
 
         """
         # assume async predict exists
