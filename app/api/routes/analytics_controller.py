@@ -215,6 +215,8 @@ async def get_recent_questions(
         # Join with ChatSession to filter by session_type = 'chatbot'
         recent_interactions = (
             db.query(entities.ChatInteraction)
+            .join(entities.ChatSession, entities.ChatInteraction.session_id == entities.ChatSession.chat_session_id)
+            .filter(entities.ChatSession.session_type == 'chatbot')
             .filter(entities.ChatInteraction.is_from_bot == False)
             .filter(entities.ChatInteraction.message_text.isnot(None))
             .order_by(desc(entities.ChatInteraction.interaction_id))
@@ -1002,9 +1004,9 @@ async def get_consultant_statistics(
         elif recent_queries > 0:
             queries_growth = 100
         
-        # Mock accuracy rate (you might want to calculate this based on ratings)
-        accuracy_rate = 85  # Mock value
-        accuracy_improvement = 5  # Mock value
+        # Accuracy rate - set to None as real calculation requires rating implementation
+        accuracy_rate = None
+        accuracy_improvement = None
         
         # Most active day (since we only have date, not time) - chatbot sessions only
         # Get the day of week with most questions in the last 30 days
