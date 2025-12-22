@@ -1061,7 +1061,7 @@ async def get_consultant_statistics(
         # Questions over time (last 7 days) - chatbot sessions only
         seven_days_ago = datetime.now() - timedelta(days=7)
         questions_over_time = []
-        for i in range(7):
+        for i in range(8):
             day = seven_days_ago + timedelta(days=i)
             day_date = day.date()
             
