@@ -266,7 +266,7 @@ class ChatSession(Base):
     feedback_rating = Column(Integer)
     notes = Column(String)
    
-    interactions = relationship('ChatInteraction', back_populates='session', cascade="all, delete-orphan")
+    interactions = relationship('ChatInteraction', back_populates='session', passive_deletes=True)
     participate_sessions = relationship('ParticipateChatSession', back_populates='session', cascade="all, delete-orphan")
 
 
@@ -290,7 +290,7 @@ class ChatInteraction(Base):
     rating = Column(Integer)
     is_from_bot = Column(Boolean)
     sender_id = Column(Integer, ForeignKey('Users.user_id'))
-    session_id = Column(Integer, ForeignKey('ChatSession.chat_session_id'))
+    session_id = Column(Integer, ForeignKey('ChatSession.chat_session_id', ondelete="SET NULL"), nullable=True)
     
     # Relationships
     user = relationship('Users', back_populates='chat_interactions')
