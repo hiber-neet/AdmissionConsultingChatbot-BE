@@ -1063,6 +1063,8 @@ async def get_consultant_statistics(
         questions_over_time = []
         for i in range(7):
             day = seven_days_ago + timedelta(days=i)
+            day_date = day.date()
+            
             day_queries = db.query(func.count(entities.ChatInteraction.interaction_id)).join(
                 entities.ChatSession, entities.ChatInteraction.session_id == entities.ChatSession.chat_session_id
             ).filter(
@@ -1070,12 +1072,12 @@ async def get_consultant_statistics(
             ).filter(
                 and_(
                     entities.ChatInteraction.is_from_bot == False,
-                    func.date(entities.ChatInteraction.timestamp) == day.date()
+                    entities.ChatInteraction.timestamp == day_date
                 )
             ).scalar() or 0
             
             questions_over_time.append({
-                "date": day.strftime('%Y-%m-%d'),
+                "date": day_date.strftime('%Y-%m-%d'),
                 "queries": day_queries
             })
         
