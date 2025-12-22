@@ -230,7 +230,7 @@ async def get_recent_questions(
                 user = db.query(entities.Users).filter(entities.Users.user_id == interaction.sender_id).first()
                 if user:
                     user_name = user.full_name or user.username
-            
+            print(interaction.message_text)
             questions.append({
                 "id": interaction.interaction_id,
                 "question": interaction.message_text,
