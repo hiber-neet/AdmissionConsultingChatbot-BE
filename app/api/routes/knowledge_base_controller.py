@@ -1,6 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, APIRouter, Form, Query
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from pathlib import Path
 import os
@@ -222,7 +222,7 @@ def get_all_training_questions(
     - Use ?status= query parameter to filter by specific status
     """
     # Build query
-    query = db.query(entities.TrainingQuestionAnswer)
+    query = db.query(entities.TrainingQuestionAnswer).options(joinedload(entities.TrainingQuestionAnswer.intent))
     
     # Apply status filter if provided
     if status:
@@ -238,6 +238,7 @@ def get_all_training_questions(
             "question": tqa.question,
             "answer": tqa.answer,
             "intent_id": tqa.intent_id,
+            "intent_name": tqa.intent.intent_name,
             "status": tqa.status,
             "created_at": tqa.created_at,
             "approved_at": tqa.approved_at,
@@ -550,7 +551,7 @@ def delete_document(
 
 def get_training_qa_or_404(question_id: int, db: Session) -> entities.TrainingQuestionAnswer:
     """Helper function to get training Q&A or raise 404"""
-    qa = db.query(entities.TrainingQuestionAnswer).filter(
+    qa = db.query(entities.TrainingQuestionAnswer).options(joinedload(entities.TrainingQuestionAnswer.intent)).filter(
         entities.TrainingQuestionAnswer.question_id == question_id
     ).first()
     
@@ -569,11 +570,27 @@ def get_pending_training_questions(
     Get all training Q&A pending review (status=draft).
     Only Admin or ConsultantLeader can access this endpoint.
     """
-    questions = db.query(entities.TrainingQuestionAnswer).filter(
+    questions = db.query(entities.TrainingQuestionAnswer).options(joinedload(entities.TrainingQuestionAnswer.intent)).filter(
         entities.TrainingQuestionAnswer.status == 'draft'
     ).all()
     
-    return questions
+    
+    return [
+        {
+            "question_id": q.question_id,
+            "question": q.question,
+            "answer": q.answer,
+            "intent_id": q.intent_id,
+            "intent_name": q.intent.intent_name if q.intent else None,
+            "status": q.status,
+            "created_at": q.created_at,
+            "approved_at": q.approved_at,
+            "created_by": q.created_by,
+            "approved_by": q.approved_by,
+            "reject_reason": getattr(q, "reject_reason", None),
+        }
+        for q in questions
+    ]
 
 
 @router.post("/training_questions/{question_id}/submit-review")
