@@ -1,4 +1,5 @@
 from datetime import datetime
+import os
 from typing import Dict, List, Callable, Awaitable
 from sqlalchemy.orm import Session, joinedload
 
@@ -338,7 +339,7 @@ class LiveChatService:
     # ======================================================================
     async def join_chat(self, websocket, session_id: int):
         print(f"[Join Chat] New WebSocket connection for session_id={session_id}")
-        
+        print("PID:", os.getpid())
         if session_id not in self.active_sessions:
             print(f"[Join Chat] Creating new session list for session_id={session_id}")
             self.active_sessions[session_id] = []
