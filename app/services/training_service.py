@@ -136,7 +136,7 @@ class TrainingService:
         """
         db = SessionLocal()
         try:
-            sessions = db.query(ChatSession).join(
+            sessions = db.query(ChatSession).filter(ChatSession.session_type == "chatbot").join(
                 ParticipateChatSession
             ).filter(
                 ParticipateChatSession.user_id == user_id
