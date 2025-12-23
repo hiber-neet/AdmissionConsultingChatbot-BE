@@ -98,7 +98,19 @@ async def websocket_chat(websocket: WebSocket):
                         "confidence": confidence
                     })
                     continue
-                
+                else:
+                    print("QA not relevant → fallback xuống document")
+                    # Chạy document search lại
+                    doc_results = service.search_documents(enriched_query, top_k=5)
+                    result = {
+                        "response": doc_results,
+                        "intent_id": doc_results[0].payload.get("intent_id"),
+                        "response_source": "document",
+                        "confidence": doc_results[0].score if doc_results else 0.0,
+                        "sources": [r.payload.get("document_id") for r in doc_results]
+                    }
+                    tier_source = "document"
+                    
             context_chunks = result["response"]
             intent_id = result["intent_id"]
             context = "\n\n".join([
@@ -106,19 +118,19 @@ async def websocket_chat(websocket: WebSocket):
             ])
             
             tier_source = await service.llm_document_recommendation_check(enriched_query, context)
-            if(tier_source == "document"):
-                doc_results = service.search_documents(enriched_query, top_k=5)
-                result = {
-                    "response": doc_results,
-                    "intent_id": doc_results[0].payload.get("intent_id"),
-                    "response_source": "document",
-                    "confidence": doc_results[0].score if doc_results else 0.0,
-                    "sources": [r.payload.get("document_id") for r in doc_results]
-                }
-                confidence = doc_results[0].score if doc_results else 0.0
-                print("Context:" + context)
-                print("Confidence of document:")
-                print(confidence)
+            # if(tier_source == "document"):
+            #     doc_results = service.search_documents(enriched_query, top_k=5)
+            #     result = {
+            #         "response": doc_results,
+            #         "intent_id": doc_results[0].payload.get("intent_id"),
+            #         "response_source": "document",
+            #         "confidence": doc_results[0].score if doc_results else 0.0,
+            #         "sources": [r.payload.get("document_id") for r in doc_results]
+            #     }
+            #     confidence = doc_results[0].score if doc_results else 0.0
+            #     print("Context:" + context)
+            #     print("Confidence of document:")
+            #     print(confidence)
             print("SOURCE NAME: " + tier_source)
             # === TIER 2: document-only (no QA match) ===
             if tier_source == "document":
