@@ -3,6 +3,7 @@ import json
 from fastapi import APIRouter, Request, WebSocket, Response
 from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
+from starlette.websockets import WebSocketDisconnect
 from app.models.entities import ChatInteraction, LiveChatQueue
 from app.services.livechat_service import LiveChatService
 from app.models.database import SessionLocal
@@ -312,7 +313,9 @@ async def chat_socket(websocket: WebSocket, session_id: int):
                 message=data["message"]
             )
     except WebSocketDisconnect:
-        print(f"[Chat] WebSocket disconnected session={session_id}")
+        print(f"[Chat] WebSocket disconnected (session_id={session_id})")
+    except Exception as e:
+        print(f"[Chat] Unexpected error: {e}")
     finally:
         # Always clean up the WebSocket connection when it ends
         await live_chat_service.leave_chat(websocket, session_id)
