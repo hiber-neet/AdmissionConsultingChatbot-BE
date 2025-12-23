@@ -116,7 +116,9 @@ async def websocket_chat(websocket: WebSocket):
                     "sources": [r.payload.get("document_id") for r in doc_results]
                 }
                 confidence = doc_results[0].score if doc_results else 0.0
-                
+                print("Context:" + context)
+                print("Confidence of document:")
+                print(confidence)
             print("SOURCE NAME: " + tier_source)
             # === TIER 2: document-only (no QA match) ===
             if tier_source == "document" and confidence > 0.7:
