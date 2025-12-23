@@ -293,10 +293,6 @@ async def admission_official_sse(request: Request, official_id: int):
         }
     )
 
-# xem các phiên live chat của 1 customer
-@router.get("/customer/{customer_id}/sessions")
-async def get_customer_sessions(customer_id: int):
-    return live_chat_service.get_customer_sessions(customer_id)
 
 #live chat
 @router.websocket("/chat/{session_id}")
@@ -313,9 +309,7 @@ async def chat_socket(websocket: WebSocket, session_id: int):
                 message=data["message"]
             )
     except WebSocketDisconnect:
-        print(f"[Chat] WebSocket disconnected (session_id={session_id})")
-    except Exception as e:
-        print(f"[Chat] Unexpected error: {e}")
+        print(f"[Chat] WebSocket disconnected session={session_id}")
     finally:
         # Always clean up the WebSocket connection when it ends
         await live_chat_service.leave_chat(websocket, session_id)
