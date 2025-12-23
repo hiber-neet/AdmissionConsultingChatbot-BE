@@ -311,6 +311,8 @@ async def chat_socket(websocket: WebSocket, session_id: int):
                 sender_id=data["sender_id"],
                 message=data["message"]
             )
+    except WebSocketDisconnect:
+        print(f"[Chat] WebSocket disconnected session={session_id}")
     finally:
         # Always clean up the WebSocket connection when it ends
         await live_chat_service.leave_chat(websocket, session_id)
