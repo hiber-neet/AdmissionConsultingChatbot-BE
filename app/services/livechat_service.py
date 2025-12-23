@@ -500,8 +500,8 @@ class LiveChatService:
                 except Exception as e:
                     print(f"[End Session] SSE error for user {uid}: {e}")
 
-            # Dọn WebSocket
-            self.active_sessions.pop(session_id, None)
+            # # Dọn WebSocket
+            # self.active_sessions.pop(session_id, None)
 
             return {"success": True}
 
