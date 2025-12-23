@@ -288,7 +288,7 @@ def revoke_permission(
                 # Check if there are any live chat queue entries referencing this officer
                 from app.models.entities import LiveChatQueue
                 active_queues = db.query(LiveChatQueue).filter(
-                    LiveChatQueue.admission_official_id == target.user_id
+                    LiveChatQueue.customer_id == target.user_id
                 ).count()
                 
                 if active_queues > 0:
