@@ -279,7 +279,7 @@ class TrainingService:
         - Nếu tầng 1 phù hợp thì không cần check đến tầng 2
         - Nếu không phù hợp với tầng 1 và tầng 2 thì trả về duy nhất 1 từ "Nope"
         - Check tầng 1(document) đầu tiên:
-        - Chỉ trả về "document" nếu NỘI DUNG của document base THỰC SỰ có thông tin trả lời câu hỏi và thông tin đó đúng ý định của người dùng muốn biết hoặc câu hỏi người dùng chỉ là những lời chào.
+        - Chỉ trả về "document" nếu NỘI DUNG của document base THỰC SỰ có thông tin trả lời câu hỏi và thông tin đó đúng ý định của người dùng muốn biết
         - Check qua tầng 2 nếu:
             • chỉ trùng từ khóa nhưng không cùng ý nghĩa
             • document không chứa dữ liệu cần thiết để trả lời
