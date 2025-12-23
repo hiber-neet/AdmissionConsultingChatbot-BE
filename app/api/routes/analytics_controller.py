@@ -1719,8 +1719,11 @@ async def get_system_health(
 async def get_intent_stats(db: Session = Depends(get_db)):
     # --- BƯỚC 1: LẤY DỮ LIỆU TỪ CÁC BẢNG (Chỉ đọc, không sửa DB) ---
     
-    # 1.1 Lấy Intent
-    intents = db.query(entities.Intent).filter(entities.Intent.is_deleted == False).all()
+    # 1.1 Lấy Intent (Lọc bỏ intent_id = 0 vì đây là intent "không nhận diện được")
+    intents = db.query(entities.Intent).filter(
+        entities.Intent.is_deleted == False,
+        entities.Intent.intent_id != 0
+    ).all()
     
     # 1.2 Lấy Training Data (Câu hỏi mẫu)
     training_data = db.query(entities.TrainingQuestionAnswer).all()
