@@ -614,12 +614,94 @@ class LiveChatService:
             
         finally:
             db.close()
+
+    def get_customer_sessions(self, customer_id: int):
+        """Danh sách các phiên live chat mà học sinh này đã tham gia"""
+        db = SessionLocal()
+        try:
+            # Tìm tất cả session live mà customer này là participant
+            sessions = (
+                db.query(ChatSession)
+                .join(
+                    ParticipateChatSession,
+                    ChatSession.chat_session_id == ParticipateChatSession.session_id,
+                )
+                .filter(
+                    ParticipateChatSession.user_id == customer_id,
+                    ChatSession.session_type == "live",
+                    ChatSession.start_time.isnot(None),
+                )
+                .order_by(ChatSession.start_time.desc())
+                .all()
+            )
+
+            result = []
+            for s in sessions:
+                # tin nhắn cuối cùng để làm preview
+                last_msg = (
+                    db.query(ChatInteraction)
+                    .filter_by(session_id=s.chat_session_id)
+                    .order_by(ChatInteraction.timestamp.desc())
+                    .first()
+                )
+
+                # tìm tư vấn viên tham gia phiên này (nếu có)
+                ao_part = (
+                    db.query(ParticipateChatSession)
+                    .join(
+                        AdmissionOfficialProfile,
+                        AdmissionOfficialProfile.admission_official_id
+                        == ParticipateChatSession.user_id,
+                    )
+                    .filter(ParticipateChatSession.session_id == s.chat_session_id)
+                    .first()
+                )
+
+                official_name = None
+                if ao_part:
+                    u = db.query(Users).filter_by(user_id=ao_part.user_id).first()
+                    official_name = u.full_name if u else None
+
+                result.append(
+                    {
+                        "session_id": s.chat_session_id,
+                        "start_time": s.start_time.isoformat()
+                        if s.start_time
+                        else None,
+                        "end_time": s.end_time.isoformat() if s.end_time else None,
+                        "status": "active" if s.end_time is None else "ended",
+                        "official_name": official_name,
+                        "last_message_time": last_msg.timestamp.isoformat()
+                        if last_msg and last_msg.timestamp
+                        else None,
+                        "last_message_preview": (last_msg.message_text[:100] if last_msg else ""),
+                    }
+                )
+
+            return {"sessions": result}
+        finally:
+            db.close()
+        
     
     def get_messages(self, session_id: int):
         db = SessionLocal()
-        msgs = db.query(ChatInteraction) \
-            .filter_by(session_id=session_id) \
-            .order_by(ChatInteraction.timestamp.asc()) \
-            .all()
-        db.close()
-        return msgs
+        try:
+            msgs = (
+                db.query(ChatInteraction)
+                .filter_by(session_id=session_id).order_by(ChatInteraction.timestamp.asc())
+                .all()
+            )
+
+            return [
+                {
+                    "interaction_id": m.interaction_id,
+                    "session_id": m.session_id,
+                    "sender_id": m.sender_id,
+                    "message_text": m.message_text,
+                    "timestamp": m.timestamp.isoformat() if m.timestamp else None,
+                    "is_from_bot": m.is_from_bot,
+                }
+                for m in msgs
+            ]
+        finally:
+            db.close()
