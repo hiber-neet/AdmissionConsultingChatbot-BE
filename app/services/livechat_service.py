@@ -496,7 +496,7 @@ class LiveChatService:
             for uid in participant_ids:
                 try:
                     await self.send_customer_event(uid, payload)
-                    await self.send_official_event(official_id, payload)
+                    await self.send_official_event(uid, payload)
                 except Exception as e:
                     print(f"[End Session] SSE error for user {uid}: {e}")
 
