@@ -313,3 +313,7 @@ async def chat_socket(websocket: WebSocket, session_id: int):
     finally:
         # Always clean up the WebSocket connection when it ends
         await live_chat_service.leave_chat(websocket, session_id)
+
+@router.get("/customer/{customer_id}/sessions")
+async def get_customer_sessions(customer_id: int):
+    return live_chat_service.get_customer_sessions(customer_id)
