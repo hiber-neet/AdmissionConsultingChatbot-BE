@@ -492,16 +492,19 @@ class LiveChatService:
                     print(f"[End Session] WS send error: {e}")
 
             # 2️⃣ Gửi qua SSE cho tất cả user tham gia (học sinh + officer nếu đang mở SSE)
-            participant_ids = [p.user_id for p in all_participants]
-            for uid in participant_ids:
-                try:
-                    await self.send_customer_event(uid, payload)
-                    await self.send_official_event(official_id, payload)
-                except Exception as e:
-                    print(f"[End Session] SSE error for user {uid}: {e}")
+            for p in all_participants:
+                # nếu là customer
+                if not db.query(AdmissionOfficialProfile).filter_by(
+                    admission_official_id=p.user_id
+                ).first():
+                    await self.send_customer_event(p.user_id, payload)
+
+            # chỉ gửi 1 lần cho official
+            if official_id:
+                await self.send_official_event(official_id, payload)
 
             # # Dọn WebSocket
-            # self.active_sessions.pop(session_id, None)
+            self.active_sessions.pop(session_id, None)
 
             return {"success": True}
 
