@@ -292,6 +292,10 @@ async def admission_official_sse(request: Request, official_id: int):
         }
     )
 
+# xem các phiên live chat của 1 customer
+@router.get("/customer/{customer_id}/sessions")
+async def get_customer_sessions(customer_id: int):
+    return live_chat_service.get_customer_sessions(customer_id)
 
 #live chat
 @router.websocket("/chat/{session_id}")
