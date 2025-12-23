@@ -87,7 +87,7 @@ async def websocket_chat(websocket: WebSocket):
 
                 if relevance_ok:
                     print("floor 1: training QA valid")
-                    async for chunk in service.stream_response_from_qa(enriched_query, a_text, intent_id, message):
+                    async for chunk in service.stream_response_from_qa(enriched_query, a_text, session_id, user_id, intent_id, message):
                         await websocket.send_text(json.dumps({
                             "event": "chunk",
                             "content": getattr(chunk, "content", str(chunk))
@@ -121,7 +121,7 @@ async def websocket_chat(websocket: WebSocket):
                 print(confidence)
             print("SOURCE NAME: " + tier_source)
             # === TIER 2: document-only (no QA match) ===
-            if tier_source == "document" and confidence > 0.7:
+            if tier_source == "document":
                 print("🔍 floor 3: using document context")
                 
                 async for chunk in service.stream_response_from_context(
