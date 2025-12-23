@@ -623,3 +623,33 @@ class LiveChatService:
             .all()
         db.close()
         return msgs
+    
+    def get_customer_sessions(self, customer_id: int):
+        db = SessionLocal()
+        try:
+            sessions = (
+                db.query(ChatSession)
+                .join(
+                    ParticipateChatSession,
+                    ChatSession.chat_session_id == ParticipateChatSession.session_id,
+                )
+                .filter(
+                    ParticipateChatSession.user_id == customer_id,
+                    ChatSession.session_type == "live",
+                )
+                .order_by(ChatSession.start_time.desc())
+                .all()
+            )
+
+            result = []
+            for s in sessions:
+                result.append({
+                    "session_id": s.chat_session_id,
+                    "start_time": s.start_time.isoformat() if s.start_time else None,
+                    "end_time": s.end_time.isoformat() if s.end_time else None,
+                    "status": "active" if s.end_time is None else "ended",
+                })
+            return result
+        finally:
+            db.close()
+  
