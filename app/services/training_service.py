@@ -459,6 +459,7 @@ class TrainingService:
             === HƯỚNG DẪN ===
             - Trả lời bằng tiếng Việt
             - Dựa vào thông tin tham khảo trên được cung cấp
+            - Chỉ sử dụng "đoạn hội thoại trước" để hiểu ngữ cảnh câu hỏi, không dùng "đoạn hội thoại trước" làm nguồn thông tin trả lời.
             - Trả lời theo định dạng Markdown: dùng tiêu đề ##, gạch đầu dòng -, xuống dòng rõ ràng.
             - Hãy tạo ra câu trả lời không quá dài, gói gọn ý chính, chỉ khi câu hỏi yêu cầu "chi tiết" thì mới tạo câu trả lời đầy đủ
             - Bạn là tư vấn tuyển sinh của trường đại học FPT, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
@@ -543,7 +544,8 @@ class TrainingService:
 
             === HƯỚNG DẪN TRẢ LỜI ===
             - Trả lời theo định dạng Markdown: dùng tiêu đề ##, gạch đầu dòng -, xuống dòng rõ ràng.
-            - Hãy trả lời chính xác bằng "CÂU TRẢ LỜI CHÍNH THỨC" mà KHÔNG SUY DIỄN.
+            - Chỉ sử dụng "đoạn hội thoại trước" để hiểu ngữ cảnh câu hỏi, không dùng "đoạn hội thoại trước" làm nguồn thông tin trả lời.
+            - Hãy trả lời chính xác bằng "CÂU TRẢ LỜI CHÍNH THỨC" mà KHÔNG SUY DIỄN THÊM.
             - Bạn là tư vấn tuyển sinh của trường đại học FPT, nhớ kiểm tra kĩ rõ ràng câu hỏi, nếu thông tin câu hỏi yêu câu tên 1 trường khác thì hãy nói rõ ra là không tìm thấy thông tin
             - Nếu câu hỏi chỉ là chào hỏi, hỏi thời tiết, hoặc các câu xã giao, hãy trả lời bằng lời chào thân thiện, giới thiệu về bản thân chatbot, KHÔNG kéo thêm thông tin chi tiết trong context.
             - Không cần phải chào hỏi mỗi lần trả lời, vào thẳng vấn đề chính
@@ -672,6 +674,7 @@ class TrainingService:
         3. Trả lời theo định dạng Markdown: dùng tiêu đề ##, gạch đầu dòng -, xuống dòng rõ ràng.
         4. Nếu câu hỏi không liên quan thì hãy từ chối yêu cầu và đề nghị nhắn trực tiếp bên tuyển sinh
         5. Không cần phải chào hỏi mỗi lần trả lời, vào thẳng vấn đề chính
+        6. Chỉ sử dụng "đoạn hội thoại trước" để hiểu ngữ cảnh câu hỏi, không dùng "đoạn hội thoại trước" làm nguồn thông tin trả lời.
         """
             full_response = ""
             async for chunk in self.llm.astream(prompt):
@@ -764,7 +767,7 @@ class TrainingService:
             2. Phản hồi một cách lịch sự, rõ ràng, không máy móc, tự nhiên như 1 tư vấn tuyển sinh
             3. Hướng người dùng đi đúng hướng tiếp theo.
             4. Có thể chào hỏi nếu người dùng gửi lời chào
-
+            5. Chỉ sử dụng "đoạn hội thoại trước" để hiểu ngữ cảnh câu hỏi, không dùng "đoạn hội thoại trước" làm nguồn thông tin trả lời.
 
             === PHONG CÁCH TRẢ LỜI ===
             - Thân thiện, tự nhiên, không máy móc
