@@ -410,7 +410,7 @@ def ban_user(
     if admission_profile:
         # Check for any live chat queue entries
         active_queues = db.query(LiveChatQueue).filter(
-            LiveChatQueue.admission_official_id == target.user_id
+            LiveChatQueue.id == target.user_id
         ).count()
         
         if active_queues > 0:
