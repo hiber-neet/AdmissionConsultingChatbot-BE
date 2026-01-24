@@ -317,3 +317,11 @@ async def chat_socket(websocket: WebSocket, session_id: int):
 @router.get("/customer/{customer_id}/sessions")
 async def get_customer_sessions(customer_id: int):
     return live_chat_service.get_customer_sessions(customer_id)
+
+@router.post("/session/rate")
+async def rate_session(session_id: int, rating: int):
+    """
+    Customer rates a finished live chat session.
+    Only session_id is required.
+    """
+    return await live_chat_service.rate_session(session_id, rating)
