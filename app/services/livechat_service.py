@@ -652,4 +652,93 @@ class LiveChatService:
             return result
         finally:
             db.close()
-  
+
+    async def rate_session(self, session_id: int, rating: int):
+        db = SessionLocal()
+        try:
+            # 1. Validate rating
+            if rating < 1 or rating > 5:
+                return {"error": "invalid_rating"}
+
+            # 2. Check session
+            session = db.query(ChatSession).filter_by(
+                chat_session_id=session_id
+            ).first()
+
+            if not session:
+                return {"error": "session_not_found"}
+
+            if session.end_time is None:
+                return {"error": "session_not_ended"}
+
+            if session.feedback_rating is not None:
+                return {"error": "already_rated"}
+
+            # 3. Find official via session participants
+            official_participant = (
+                db.query(ParticipateChatSession)
+                .join(
+                    AdmissionOfficialProfile,
+                    AdmissionOfficialProfile.admission_official_id
+                    == ParticipateChatSession.user_id
+                )
+                .filter(ParticipateChatSession.session_id == session_id)
+                .first()
+            )
+
+            if not official_participant:
+                return {"error": "official_not_found"}
+
+            official_id = official_participant.user_id
+
+            # 4. Save rating to session
+            session.feedback_rating = rating
+            db.flush()  # <-- FIX 1
+
+            # 5. Recalculate official average rating
+            ratings = (
+                db.query(ChatSession.feedback_rating)
+                .join(
+                    ParticipateChatSession,
+                    ChatSession.chat_session_id == ParticipateChatSession.session_id
+                )
+                .filter(
+                    ParticipateChatSession.user_id == official_id,
+                    ChatSession.feedback_rating.isnot(None)
+                )
+                .all()
+            )
+
+            rating_values = [r[0] for r in ratings]
+            print("DEBUG ratings:", ratings)
+            print("DEBUG rating_values:", rating_values)
+            
+            if not rating_values:   # <-- FIX 2
+                new_avg = float(rating)
+            else:
+                new_avg = round(sum(rating_values) / len(rating_values), 1)
+
+            official_profile = db.query(AdmissionOfficialProfile).filter_by(
+                admission_official_id=official_id
+            ).first()
+
+            official_profile.rating = new_avg
+
+            db.commit()
+
+
+            return {
+                "success": True,
+                "session_id": session_id,
+                "official_id": official_id,
+                "rating": rating,
+                "official_avg_rating": new_avg
+            }
+
+        except Exception as e:
+            db.rollback()
+            import traceback
+            traceback.print_exc()
+            return {"error": f"database_error: {str(e)}"}
+        finally:
+            db.close()
