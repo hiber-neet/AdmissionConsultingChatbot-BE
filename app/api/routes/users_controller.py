@@ -402,22 +402,22 @@ def ban_user(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot ban another admin")
 
     # Check if user is an admission officer with active queue entries
-    from app.models.entities import AdmissionOfficialProfile, LiveChatQueue
-    admission_profile = db.query(AdmissionOfficialProfile).filter(
-        AdmissionOfficialProfile.admission_official_id == target.user_id
-    ).first()
+    # from app.models.entities import AdmissionOfficialProfile, LiveChatQueue
+    # admission_profile = db.query(AdmissionOfficialProfile).filter(
+    #     AdmissionOfficialProfile.admission_official_id == target.user_id
+    # ).first()
     
-    if admission_profile:
-        # Check for any live chat queue entries
-        active_queues = db.query(LiveChatQueue).filter(
-            LiveChatQueue.id == target.user_id
-        ).count()
+    # if admission_profile:
+    #     # Check for any live chat queue entries
+    #     active_queues = db.query(LiveChatQueue).filter(
+    #         LiveChatQueue.id == target.user_id
+    #     ).count()
         
-        if active_queues > 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot ban this admission officer: They have {active_queues} active or pending live chat queue entries. Please resolve these queue entries first."
-            )
+    #     if active_queues > 0:
+    #         raise HTTPException(
+    #             status_code=status.HTTP_400_BAD_REQUEST,
+    #             detail=f"Cannot ban this admission officer: They have {active_queues} active or pending live chat queue entries. Please resolve these queue entries first."
+    #         )
 
     target.status = False
     db.commit()
